@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>LidarTreeSegmenter – How it works</title>
+<link rel="stylesheet" href="style.css"></head><body>
+
+<section class="cover">
+  <div class="t1">LidarTreeSegmenter</div>
+  <div class="t2">How it works: from a point cloud to stand volume</div>
+  <div class="t3">A description of all stages, algorithms, parameters and accuracy</div>
+  <p style="margin-top:12mm">This document describes the program as it is in the code. Where something is a simplification or has not been verified yet, it says so plainly. The figures were made on the synthetic test plot that ships with the program (<code>tree_segmenter_tool/90_make_test_forest.py</code>, 28 trees); the accuracy figures in chapter 11 come from real mobile laser scans of mountain spruce and beech stands.</p>
+  <p class="t3">How to use the program step by step is in the <b>User manual</b> (<code>docs/user_manual.pdf</code>).</p>
+</section>
+
+<section class="toc"><h1>Contents</h1>
+<ol>
+<li>Introduction: what the program does and what it is made of</li>
+<li>Glossary: point cloud, voxel, slice and other words</li>
+<li>Stage 1: tree detection and DBH</li>
+<li>Stage 2: stem, branches, foliage, shrubs and snags</li>
+<li>Stage 3: report, cylinder check, choice of DBH, volume</li>
+<li>Matching to a field measurement (GPS)</li>
+<li>Scanner path, terrain model and walk-through animation</li>
+<li>List of algorithms</li>
+<li>Parameters and stand classes</li>
+<li>Columns and indicators in Excel</li>
+<li>Accuracy: what we know from tests</li>
+<li>Limitations</li>
+<li>References</li>
+</ol></section>
+
+<h1>1. Introduction</h1>
+<p>LidarTreeSegmenter takes a point cloud from a laser scanner (a <code>.laz</code> or <code>.las</code> file) and does with it what a forester does with a tape, a caliper and a height meter: it finds the trees, measures their DBH and height, computes basal area and volume, and finally assembles a stand report. In addition it splits every tree into stem, branches and foliage, tells shrubs and snags apart from healthy trees, removes objects that have no real stem, and, when you have a few trees measured with GPS, moves the whole scan into real-world coordinates.</p>
+<figure><img src="fig/view3d.png"><figcaption>Fig. 1. Point cloud of the test plot (about 570,000 points on 0.09 ha) after segmentation. Each point is one laser reflection from bark, a needle, a branch or the ground; each tree has its own colour.</figcaption></figure>
+<p>The program works in three stages. Each stage is a separate file in the <code>program</code> folder and each saves its results, so the next one can use them, and the report can be recomputed without processing the cloud again.</p>
+<div class="flow">
+<div><b>Stage 1 – trees</b>cleaning the cloud, terrain model, stem search in slices, assigning points to trees, DBH and height<br><code>05_wykryj_drzewa.py</code> + <code>tree_segmenter_tool</code></div>
+<div><b>Stage 2 – tree parts</b>stem tracking up to the crown, shape features, wood or leaf (random forest), shrub / snag, understory, preliminary species<br><code>10_pien_galezie_liscie.py</code></div>
+<div><b>Stage 3 – report</b>cylinder check, choice of DBH, height curve, volume, per-hectare indicators, Excel, GeoPackage, field measurement<br><code>30_raport.py</code></div>
+<div><b>3D view</b>cloud in the browser, reviewing trees one by one<br><code>40_widok_3d.py</code></div>
+</div>
+<div class="box"><b class="t">The most important thing to remember</b>Stage 1 is pure geometry: the program has not “learned” from examples, it looks for shapes that look like a stem (vertical, round, hollow inside). The only machine learning in the whole program is in stage 2, when separating wood from leaves, and it is trained from scratch on every scan without your labels. That is why every result can be explained step by step, which is what this document does.</div>
+
+<h1>2. Glossary</h1>
+<table>
+<tr><th>Word</th><th>Meaning</th></tr>
+<tr><td>LiDAR, laser scanner</td><td>A device that sends laser pulses and measures how long they take to return. From the time and direction it computes the position of the reflection point (x, y, z).</td></tr>
+<tr><td>MLS, TLS</td><td>Mobile scanning (you walk with the scanner) and terrestrial scanning from a tripod. With MLS the scanner sees trees from many sides, but not always all around.</td></tr>
+<tr><td>Point cloud</td><td>A set of millions of points (x, y, z). In the program it is a table with N rows and 3 columns.</td></tr>
+<tr><td>.las / .laz</td><td>Point cloud file format; .laz is the compressed version. Besides x, y, z the file may have extra fields, e.g. a tree number.</td></tr>
+<tr><td>Voxel</td><td>A cube in space (a 3D pixel). Dividing the cloud into voxels and keeping one point per cube makes the cloud lighter.</td></tr>
+<tr><td>Slice</td><td>A thin horizontal layer of the cloud, e.g. 1.25–1.35 m above ground. In a slice a stem looks like a circle or an arc from above.</td></tr>
+<tr><td>DTM (terrain model)</td><td>The ground surface. The height above ground of every point is measured from it.</td></tr>
+<tr><td>Neighbours (k nearest)</td><td>The k points closest to a given point. They are found quickly with a k-d tree.</td></tr>
+<tr><td>Angular coverage</td><td>How much of the stem circumference the scanner saw, in degrees (360° = the whole circumference).</td></tr>
+<tr><td>Hollowness</td><td>The share of points near the circle that lie away from its centre. A stem is empty inside (the laser reflects from the bark), a shrub is not.</td></tr>
+<tr><td>Circle chain</td><td>Circles from successive slices stacked above each other, i.e. a piece of stem.</td></tr>
+<tr><td>Graph</td><td>Points connected by edges to their neighbours, like a road network. It allows computing a “distance along the cloud”.</td></tr>
+<tr><td>Random forest</td><td>A machine learning method: many simple decision trees vote on whether a point is wood or leaf.</td></tr>
+<tr><td>DBH (D1.3)</td><td>Stem diameter at 1.3 m.</td></tr>
+<tr><td>Slenderness h/d</td><td>Height divided by DBH (in the same units). A healthy spruce usually has 50–100.</td></tr>
+<tr><td>Snag</td><td>A broken tree: thick stem, low height.</td></tr>
+<tr><td>Understory</td><td>Shrubs and regeneration near the ground that are not part of the measured tree.</td></tr>
+</table>
+
+<h1>3. Stage 1: tree detection and DBH</h1>
+<p>Stage 1 runs <code>tree_segmenter_tool/02_detect_trees.py</code> with settings chosen by LidarTreeSegmenter, and runs the stem search a second time, higher up. The steps appear in the log as <code>[KROK 1]</code>, <code>[KROK 2]</code> and so on (<i>krok</i> = step).</p>
+<div class="step"><span class="n">1</span><h3>Loading and thinning (1 cm voxels)</h3></div>
+<p>The program reads the file and turns it into a table of coordinates in metres. A mobile scanner produces very many points in one place (close to its path), so the cloud is thinned first: space is divided into 1 cm cubes and one point is kept from each. The shape of the trees does not change and the computation becomes faster.</p>
+<div class="box"><b class="t">Algorithm: voxel grid downsampling</b>The voxel index is x, y, z divided by 1 cm and rounded down. The program keeps the first point of each voxel (not the mean). Parameter: <code>VOXEL_WEJSCIOWY = 0.01 m</code>. Source: Rusu and Cousins 2011 (PCL library).</div>
+<div class="step"><span class="n">2</span><h3>Noise removal (SOR)</h3></div>
+<p>Noise means single points “in the air”: reflections from dust, droplets, measurement errors. For each point the program computes the mean distance to its 12 nearest neighbours. A point in a dense crown has neighbours close by, a ghost point far away. Points whose mean distance is larger than the mean of the whole cloud plus 2.5 standard deviations are removed (typically about 3 % of points).</p>
+<div class="box"><b class="t">Algorithm: Statistical Outlier Removal (SOR) + k-d tree</b>Parameters: <code>SOR_SASIEDZI = 12</code>, <code>SOR_PROG_ODCHYLEN = 2.5 σ</code>. Neighbours are found with a k-d tree (<code>scipy.spatial.cKDTree</code>), which divides space into boxes so that not every point has to be compared with every other. The code warns that a too strict threshold (e.g. 1.5) “eats” tree tops and lowers heights. Sources: Rusu et al. 2008 (SOR), Bentley 1975 (k-d tree).</div>
+<div class="step"><span class="n">3</span><h3>Terrain model</h3></div>
+<p>The terrain is divided into 0.5 × 0.5 m squares, and in each the lowest point is taken as a ground candidate. Sometimes the scanner did not see the ground in a square and the “lowest point” is on a branch. So the program joins neighbouring squares if their heights differ by at most 40 cm and keeps only the largest connected “island”: that is the ground. It also rejects squares half a metre higher than the median of their 9 neighbours (logs, mounds, shrubs).</p>
+<figure><img src="fig/hw_terrain.png"><figcaption>Fig. 2. A strip through the test plot. Top: height z from the scanner; the brown line is the terrain model (the ground rises to the right). Bottom: after subtracting the terrain every point has a height above ground, and the red line at 1.3 m is where DBH is measured.</figcaption></figure>
+<div class="box"><b class="t">Algorithm: grid minimum + largest connected component + median filter</b>A simple method of our own, not the CSF (cloth simulation) filter known from airborne LiDAR: the code says explicitly that CSF is meant for airborne data. Connected components: <code>scipy.sparse.csgraph.connected_components</code> (Hopcroft and Tarjan 1973). Parameters: cell 0.5 m, step between cells 0.40 m (with a 0.5 m cell that is a slope of up to 80 %), difference from neighbours 0.5 m.</div>
+<div class="step"><span class="n">4</span><h3>Height above ground</h3></div>
+<p>Under every point the program computes the ground height by interpolating between the terrain model points (Delaunay triangles, value weighted by position in the triangle) and subtracts it from z. At the plot edges, where there are no triangles, it takes the height of the nearest ground point. Trees more than 4 m from visible ground get a note that their height is uncertain.</p>
+<div class="box"><b class="t">Algorithm: linear interpolation on a Delaunay triangulation</b><code>scipy.interpolate.griddata(method="linear")</code>, using the Qhull library underneath (Barber et al. 1996, Delaunay 1934).</div>
+<div class="step"><span class="n">5</span><h3>Stem search: tracking slice by slice</h3></div>
+<p>This is the most important step of stage 1. The program cuts a band from 0.5 to 6 m above ground and looks for stems in it in four sub-steps.</p>
+<p><b>a) Only vertical surfaces remain.</b> For each point the program takes 20 neighbours and checks how the surface they lie on is oriented (principal component analysis, PCA). Stem bark is a vertical wall, leaves and branches lie any way. Points whose surface is nearly vertical (vertical component of the normal below 0.25) are kept.</p>
+<p><b>b) Circles in each slice.</b> The band is divided into 25 cm slices. In each slice the vertical-surface points are grouped with DBSCAN: points lying densely next to each other form a group, isolated points are rejected. The program fits a circle to every group and checks three things: whether the circle fits the points well (error up to 4 cm), whether at least 90° of the circumference is visible, and whether the centre is empty (at least 80 % of points lie farther than 0.7 radius from the centre).</p>
+<figure><img src="fig/hw_slice.png"><figcaption>Fig. 3. A slice 1.75–2.0 m above ground of the test plot. Left: the points of the slice. Right: the circles that passed all tests, one per stem.</figcaption></figure>
+<figure><img src="fig/hw_circle.png"><figcaption>Fig. 4. Circle fitted to the bark points of tree 1 at 1.3 m. Blue lines are the deviations of the points from the circle; the program looks for the circle for which they are smallest. Right: their distribution, within ±1.5 cm.</figcaption></figure>
+<p><b>c) Joining circles into chains.</b> Going from the bottom up, the program attaches a circle to a chain if it lies above it (shift at most 25 cm per slice, allowed gap up to 3 slices) and has a similar radius (change up to 50 %). A chain is a stem. A chain shorter than 6 links (1.5 m) is not accepted as a tree.</p>
+<p><b>d) Re-measurement along the stem axis and DBH.</b> Through the circle centres of the chain the program fits a straight line, the stem axis. Every slice is measured again, but only from points closer than 60 cm to the axis, with RANSAC: 500 times it draws three points, puts a circle through them and counts how many points lie on it (±2 cm), minus a penalty for points inside. The circle centre must lie at most 8 cm from the axis. According to tests recorded in the code this reduced DBH overestimation from +12 cm to +2.6 cm. Chains ending above 1.6 m are extended down to 1.0 m by prolonging the axis and radius.</p>
+<p>The DBH is the radius read at 1.3 m from a line fitted to the circles between 0.8 and 3.5 m, times two. A leaning stem (more than 5°) gets a small correction, because the horizontal section of a leaning cylinder is an ellipse. When the chain does not cover 1.3 m (±0.3 m), the DBH stays empty: extending downwards is deliberately switched off, because on a test plot it gave an error of 5.5–11.5 cm instead of 2.8 cm with a normal measurement.</p>
+<p>LidarTreeSegmenter runs this step a second time, higher, from 2.5 to 8.5 m. A stem found only higher up that does not overlap any earlier one is added as a new tree (“detected from above”). This helps in dense understory.</p>
+<div class="box"><b class="t">Algorithms of step 5</b>PCA (Hoppe et al. 1992): surface normal from 20 neighbours. DBSCAN (Ester et al. 1996): density clustering, radius 15 cm, min. 10 points. Kåsa circle fit (Kåsa 1976): algebraic least squares with three rounds of outlier rejection (mean + 2σ). RANSAC (Fischler and Bolles 1981): random point triples, with an added penalty for a filled centre and an “anchor” on the stem axis (our own modifications). Chain joining: greedy attachment of the nearest circle (our own). Parameters: slices every 0.25 m, range 0.5–6.0 m, stem diameter 6–120 cm (in a young stand 4.8–40 cm), min. 6 links.</div>
+<div class="step"><span class="n">6</span><h3>Assigning points to trees (graph segmentation)</h3></div>
+<p>Once the stems are found, every crown point has to be told which tree it belongs to. The simplest method (nearest stem from above) cuts crowns vertically and overhanging branches go to the neighbour. So the program uses a graph: the cloud is thinned to 30 cm voxels, every voxel is connected to its 20 nearest neighbours (edges up to 1 m), and then for every voxel the shortest path “along the cloud” to some stem is computed. A step sideways costs twice as much as a vertical step, so the path prefers to go down a branch to its own stem rather than jump to a neighbour.</p>
+<figure><img src="fig/hw_segmentation.png" style="max-height:110mm"><figcaption>Fig. 5. Result on the test plot, top view: every tree has its own colour and number. Grey points are ground and what could not be connected to any stem.</figcaption></figure>
+<div class="box"><b class="t">Algorithm: multi-source Dijkstra on a k-nearest-neighbour graph</b>Edge weight = √(4·(dx² + dy²) + dz²). Sources are voxels at 1–4 m within 0.8 m of a stem. Unreachable voxels get the number of the nearest reached one (up to 3 m); points lower than 0.3 m above ground get zero. Parameters: <code>GRAF_ROZMIAR_VOXELA = 0.30 m</code>, <code>GRAF_SASIEDZI = 20</code>, <code>GRAF_MAX_DLUGOSC_KRAWEDZI = 1.0 m</code>, <code>GRAF_KARA_POZIOMA = 4</code>. In tests recorded in the code this reduced the height error (RMSE) from 3.32 m to 1.06 m compared with the nearest-stem method. Sources: Dijkstra 1959; similar approaches: Tao et al. 2015, Wang 2020.</div>
+<div class="step"><span class="n">7</span><h3>Tree height, dead trees, forks</h3></div>
+<p>Tree height is the highest point assigned to the tree, above ground. The program also flags probably dead trees (almost no points in the upper 40 % of the height) and stems that join below 0.5 m (forks). These are hints; they do not remove anything.</p>
+<div class="step"><span class="n">8</span><h3>Sanity filter and saving</h3></div>
+<p>Trees with slenderness h/d below 25 (e.g. 5 m height with 40 cm DBH) are put in a separate table <code>odrzucone_smuklosc.csv</code>, because on four test plots these were almost always errors. Other filters (upper slenderness, “stem wall”, taper) are off, because they rejected real trees. Finally the cloud with a tree number for every point (<code>_segmenty.laz</code>) and the tree table are saved. The plot area is the number of 25 × 25 cm squares containing any point (overestimates by about 2 % at the edge).</p>
+
+<h1>4. Stage 2: stem, branches, foliage</h1>
+<p>Stage 2 takes each tree separately and splits it into parts in more detail. The result is a cloud with the field <code>czesc</code> (1 stem, 2 branches, 3 foliage, 4 understory), a table of stem cross-sections every 20 cm, an image of every tree and a GeoPackage.</p>
+<div class="step"><span class="n">1</span><h3>Tracking the stem up to the crown</h3></div>
+<p>Stage 1 only looked at the band 0.5–6 m. Now the program looks for the stem of each tree from several starting heights (1, 2, 3, 4, 5 and 6.5 m) and from each start goes up and down with circles every 20 cm, predicting the position of the next circle from the previous ones. The longest consistent chain wins. If the stem base is more than 35 % thicker than the taper higher up suggests, a shrub has stuck to the stem; such a section is cut out. The missing base is then reconstructed: axis and diameter are extended downwards (the stem gets 0–1.5 cm of radius thicker per metre downwards). Reconstructed circles are blue on the images and have a blue background in Excel.</p>
+<figure><img src="fig/hw_taper.png"><figcaption>Fig. 6. Tree 4 of the test plot. Left: stem cross-sections every 20 cm (red lines) over the tree's points. Right: diameter as a function of height, the taper curve. The black line is the smoothed values (median of 5 neighbouring sections).</figcaption></figure>
+<div class="box"><b class="t">Algorithms</b>Start: DBSCAN (radius 8 cm) + RANSAC circle (200 draws, band ±2 cm) + Kåsa on the agreeing points. Tracking: position predicted by a line through the last 6 circles, RANSAC “anchored” 12 cm from the prediction; the radius may change by −30 % to +15 % upwards and only by −8 % to +10 % downwards. Smoothing: moving median of 5. The idea of tracking a stem with circles is related to QSM models (Raumonen et al. 2013, Hackenberg et al. 2015), but the program does not implement them.</div>
+<div class="step"><span class="n">2</span><h3>Shape features, and 3 wood or leaf</h3></div>
+<p>The tree cloud is thinned to 2.5 cm voxels. For every voxel the program takes its neighbours (12, then 40) and checks what shape they form: a line (branch), a plane (bark seen from close) or a ball (needles, leaves). Numerically this is PCA: the spread of the points gives three numbers λ1 ≥ λ2 ≥ λ3 (like length, width and thickness of the little cloud).</p>
+<ul>
+<li>linearity = (λ1 − λ2) / λ1: large for branches,</li>
+<li>planarity = (λ2 − λ3) / λ1: large for bark,</li>
+<li>scattering = λ3 / λ1: large for needles and leaves,</li>
+<li>verticality: whether the main direction is vertical,</li>
+<li>density: distance to the farthest neighbour.</li>
+</ul>
+<p>Then the program creates its own training examples: wood is stem voxels and clear lines (linearity above 0.8 at both scales), leaves are clear balls (scattering above 0.15) farther than 0.5 m from the stem. On these examples it trains a random forest (80 decision trees) and asks it about all the other voxels. The result is a wood probability <code>p_drewno</code>: above 0.5 a branch, below foliage. The distance from the stem is not given to the model, so that it does not learn the trivial rule “close to the stem = wood”.</p>
+<figure><img src="fig/view3d_tree.png"><figcaption>Fig. 7. One tree after splitting into parts, in the 3D view: stem, branches and foliage. The red ring marks the DBH at 1.3 m.</figcaption></figure>
+<div class="box"><b class="t">Algorithm: eigenvalue features + random forest trained on rule-based examples</b>Features: Demantké et al. 2011, Weinmann et al. 2015. Random forest: Breiman 2001 (<code>RandomForestClassifier</code>, 80 trees, depth up to 14). Training on automatically chosen examples is self-training (Yarowsky 1995), here in one round. Similar methods: Krishna Moorthy et al. 2020, Wang et al. 2020 (LeWoS), Vicari et al. 2019.</div>
+<div class="box warn"><b class="t">Note</b>The branches / foliage split has not been verified numerically yet, because there is no cloud with manually labelled wood and leaves. It was only judged visually. In a leaf-off (winter) scan “foliage” in practice means fine twigs.</div>
+<div class="step"><span class="n">5</span><h3>Crown clean-up</h3></div>
+<p>Small pieces of “wood” floating in the crown, not connected to the stem (fewer than 25 voxels, about 60 cm of twig), are changed to foliage. The program joins neighbouring wood voxels into groups (connected components of a graph) and checks the size of each group.</p>
+<h2>Stem check: tree, shrub or snag</h2>
+<p>A stem in cross-section is empty inside, because the laser reflects from the bark. A shrub or a cluster of branches has points inside too. At 1.3 m and again at 3 m the program computes the share of points near the circle that lie closer to the centre than 0.7 radius. Stems have 0–2 % such points, shrubs 20–50 %.</p>
+<figure><img src="fig/hw_hollow.png"><figcaption>Fig. 8. The hollowness test. The dashed circle is 0.7 × the radius; the share of points inside it decides. A stem seen from one side only is still empty inside, so partial visibility alone does not reject a tree.</figcaption></figure>
+<table>
+<tr><th>Situation</th><th>Result</th><th>Next</th></tr>
+<tr><td>Low (below 15 m) and very thick (h/d below 20), stem clearly hollow at 1.3 and 3 m</td><td>snag</td><td>stays in the results; volume = volume of the measured stem, not the formula</td></tr>
+<tr><td>Low and very thick, stem not hollow</td><td>shrub (stump, cluster)</td><td>left out of totals</td></tr>
+<tr><td>Points inside at both heights and lower than 5 m (young) / 10 m (mature)</td><td>shrub</td><td>left out of totals</td></tr>
+<tr><td>Many points inside, but the tree is tall</td><td>uncertain</td><td>stays in the results with a note</td></tr>
+<tr><td>Stem hollow</td><td>ok</td><td>–</td></tr>
+</table>
+<p>These are the program's own rules (thresholds: hollow below 15 % of points inside, full from 20 %, snag below 8 %). You have the last word in the tree review mode of the 3D view. In stage 3 a stricter cylinder check follows (chapter 5).</p>
+<h2>Understory</h2>
+<p>Branch and leaf points of a tree that lie low (up to 1.5 m in a young stand, up to 3 m in a mature one) and farther from the stem than 0.6 m / 1 m are shrubs near the stem, not branches of the tree. They get a separate class “understory”.</p>
+<h2>Shrubs as objects</h2>
+<p>The stage 1 segmentation assigns every vegetation point to some tree, so shrubs were not separate objects, only understory points near trees. The module <code>lts_krzewy.py</code> (run in stage 3, so it works after “Recalculate report”) turns them into countable shrubs:</p>
+<ol>
+<li><b>Candidates:</b> understory points 0.3–4 m above ground, and low branches and leaves of trees that have an empty band of at least 1 m above them before the crown. Stem points and anything closer than 15 cm to the bark are never a shrub, so DBH and stem do not change.</li>
+<li><b>Shrub body:</b> a 25 cm grid from above; a cell is shrubby when points occupy at least 3 layers of 25 cm between 0.5 and 3.25 m and the highest is at least 0.8 m. Grass and ferns alone (one thin layer) drop out.</li>
+<li><b>Shrubs:</b> morphological closing and opening, joining neighbouring cells into patches, splitting large patches by their tops (local maxima of the smoothed height at least 1.25 m apart), rejecting patches below 0.5 m².</li>
+<li>For every shrub: centre, area from above, height (95th percentile), highest point, number of points. Output: <code>03_TABELE\&lt;scan&gt;_krzewy.csv</code> and the grid <code>_krzewy.npz</code> (used by the 3D view to colour points).</li>
+</ol>
+<p>The thresholds were set on one plot and should be checked on others.</p>
+<h2>Two stems in one tree</h2>
+<p>When stems stand right next to each other or are fused at the base, the stage 1 segmentation merges them into one tree. Before stem tracking, stage 2 does the following for each tree:</p>
+<ol>
+<li>Track the main stem (as usual), then remove the points within 3 cm of its bark and track a second time on the rest.</li>
+<li>The second stem is real when: the measured section is at least 4 m long and at least 40 % of the tree height (dense spruce whorls produce short “stems” made of branches), the diameter is at least 10 cm, lean up to 20° from vertical, median circle arc at least 150°, and at least 80 % of the circles lie beside the main stem (bark does not overlap bark). Branches drop out because they are shorter and more oblique.</li>
+<li><b>The 1.3 m rule:</b> the tree is split when the second stem was measured from 1.8 m downwards, or the arc of its bark is visible at 1.3 m (at least 60°) next to the main stem, or it stands at least 0.5 m away from the start (base hidden). Otherwise it is a fork above 1.3 m: one tree with a note, as forest mensuration rules require.</li>
+<li><b>Splitting the points:</b> every point goes to the stem whose bark is closer horizontally; above and below the measured sections the axes are extended by a straight line. The old number stays with the thicker stem (it owns the stage 1 DBH), the second gets a new number and the stage 2 DBH.</li>
+</ol>
+<p>Tracking has a random element (RANSAC), so each tree gets up to 3 attempts with a seed derived from the tree number, which makes the result repeatable. Stage 2 takes about 3–4 minutes longer because of this. Limitations: crowns are split only along the extended axes, so the boundary in the crown is approximate; a second stem hidden in dense understory along its whole length will not be found. Output: <code>03_TABELE\&lt;scan&gt;_rozdzielone.csv</code>; to switch off: option <code>--bez-rozdzielania</code>.</p>
+<h2>Species (preliminary)</h2>
+<p>From the shape the program estimates whether a tree is coniferous (spruce) or broadleaved (beech). It weighs four features: how high the straight stem reaches relative to the tree height (50 %), how narrow the top is (20 %), where the crown's centre of mass is (15 %) and the ratio of crown width to length (15 %). Trees lower than 8 m and ambiguous ones stay “unspecified”. These are rules without learning, and in a dense stand crowns overlap, so in the window you can choose “spruce only” or “beech only”.</p>
+<p><b>Scanner tags.</b> A handheld scanner records the time, the chosen code and its own position in the cloud's coordinates each time the marker button is pressed (file <code>markPoint.csv</code> in the raw session folder). In tests most tags lay 0.05–0.25 m from a stem found in stage 1, so the tag position is practically the tree position. The module <code>lts_etykiety.py</code> assigns each tag to the nearest stem closer than 1 m. When one tree has two tags, the later one wins (treated as a correction). When a plot has several sessions (several folders, each possibly with its own coordinate system), the session whose tags most often hit stems is used, and a session hitting less than half is rejected. Codes: FI spruce, BU beech, TA fir, KI pine, LA larch, EI oak, AH sycamore, ES ash, KR cherry, UL elm, taxus yew.</p>
+
+<h1>5. Stage 3: report</h1>
+<h2>Cylinder check: is there really a stem here?</h2>
+<p>Stage 1 sometimes reports a “tree” where there is none: a cluster of branches, a shrub or a piece of a neighbour's crown that happened to produce a few circle-like arcs. The module <code>lts_walec.py</code> (<i>walec</i> = cylinder) checks every tree against all scan points, not only those assigned to the tree. A stem is a cylinder: a straight, nearly vertical axis, a constant or gently decreasing radius, points on the bark and nothing inside.</p>
+<p>For each tree the program takes all points within 0.7 m of the stem position at 0.6–3.0 m above ground and:</p>
+<ol>
+<li>in every 25 cm slice looks for a circle with RANSAC; a circle is better the larger the part of the circumference covered by points and the fewer points lie inside it;</li>
+<li>checks whether the circles of successive slices stack into one cylinder (centre in almost the same place, similar radius);</li>
+<li>fits a single cylinder to the agreeing slices (the axis may lean slightly, the radius may change linearly with height);</li>
+<li>measures how well the points fit this cylinder: in how many slices the cylinder has bark points (continuity); what part of the circumference is visible, also compared with the sides the scanner path passed (if the scanner walked around the stem and points are only on one side, it is not a stem); how many points lie inside the cylinder (a shrub has a full centre); and whether the radius is not larger than the spread of the points it rests on (an arc of 100° allows fitting a circle of almost any size).</li>
+</ol>
+<p>Result: <b>stem</b> (cylinder confirmed), <b>no stem</b> (the tree is rejected and not included in totals) or <b>uncertain</b> (stays, with a note), plus a DBH from the cylinder at 1.3 m. When two reported trees turn out to stand on the same cylinder, the duplicate is marked. The verdicts are saved in <code>03_TABELE\&lt;scan&gt;_kontrola_walca.csv</code> and computed again only when the inputs change. On a real scan of a dense stand this check removed the false trees that the previous version still counted; on the synthetic test plot all 28 trees were confirmed as stems.</p>
+<h2>Where the DBH in the report comes from</h2>
+<p>DBH is measured by two independent methods: stage 1 (band 0.5–6 m) and stage 2 (tracking the whole stem). The report chooses in this order:</p>
+<ol>
+<li>By default the stage 1 DBH.</li>
+<li>Trees known only to stage 2 are added (so that snags and shrubs do not silently disappear).</li>
+<li>Your decisions from the tree review override the stem checks.</li>
+<li>When stage 1 did not measure the DBH (stem hidden at 1.3 m) but stage 2 did, and the tree has at least 8 m and slenderness 40–150, the stage 2 DBH is used. A snag without a stage 1 DBH also gets the stage 2 DBH.</li>
+<li>When the two methods differ by more than 30 %, the height curve decides.</li>
+</ol>
+<h2>Height curve</h2>
+<p>In a stand, height increases with DBH in a predictable way. The program fits the Näslund curve h = 1.3 + d² / (a + b·d)² to the trees for which both methods give the same DBH (±15 %), at least 8 trees. When the methods disagree, the DBH that fits the curve better (by at least 2 m) wins. A tree whose DBH does not fit its height at all (deviation above 6 m or 2.5 times the curve error) gets the note “check the image”.</p>
+<figure><img src="fig/hw_height_curve.png" style="max-height:85mm"><figcaption>Fig. 9. Height–diameter curve of the test plot (Näslund model fitted to the trees).</figcaption></figure>
+<div class="box"><b class="t">Algorithm: non-linear least squares (Levenberg–Marquardt)</b><code>scipy.optimize.curve_fit</code>. Sources: Näslund 1936; Levenberg 1944; Marquardt 1963.</div>
+<h2>Volume</h2>
+<p>The merchantable volume of a tree is computed with the formula V = g · h · f, where g = π·d²/4 is the cross-section area at 1.3 m, h the height and f the breast-height form factor (what part of a cylinder with cross-section g and height h is merchantable wood). The values in <code>tablice_miazszosci.csv</code>: spruce 0.47, beech 0.51, unspecified 0.47, coniferous 0.45, broadleaved 0.50 (the last two for species without their own row, e.g. larch or sycamore). These are approximate values; you can replace the file with regional tables, also with a power formula V = a·d<sup>b</sup>·h<sup>c</sup>.</p>
+<p>A second number, “volume of the measured stem section”, is the sum of truncated cones between consecutive stem cross-sections every 20 cm: the volume of the part of the stem the scanner really saw (without the top). It is used as a check, and for snags it replaces the formula, because the formula with height would overestimate. Truncated cone between cross-sections with areas A1 and A2, Δh apart: V = Δh · (A1 + A2 + √(A1·A2)) / 3.</p>
+<div class="box"><b class="t">Why DBH matters so much</b>Volume grows with the square of DBH: a tree twice as thick has four times as much wood, so a DBH error of 2 cm at 30 cm gives a volume error of about 13 %.</div>
+<h2>Stand indicators</h2>
+<table>
+<tr><th>Indicator</th><th>How it is computed</th></tr>
+<tr><td>N/ha</td><td>number of trees (without shrubs) / area in ha</td></tr>
+<tr><td>Dg, quadratic mean DBH</td><td>√(mean of d²): diameter of the tree with the mean basal area</td></tr>
+<tr><td>Lorey's height</td><td>Σ(g·h) / Σg: mean height weighted by basal area (thicker trees weigh more)</td></tr>
+<tr><td>G/ha</td><td>sum of cross-section areas / area</td></tr>
+<tr><td>V/ha</td><td>sum of volumes / area</td></tr>
+<tr><td>DBH distribution</td><td>4 cm diameter classes: number of trees, N/ha, G/ha, V/ha</td></tr>
+</table>
+
+<h1>6. Matching to a field measurement</h1>
+<p>The scanner does not know where north is or where on the map it stood. If you measure a few trees in the field (position from GPS and DBH with a tape), the program finds them in the scan and rotates and shifts the scan into real coordinates.</p>
+<ol>
+<li>GPS coordinates (degrees) are converted to metres in UTM or PUWG 1992 (Gauss–Krüger projection, Krüger series; accuracy checked against the pyproj library: below 0.1 mm).</li>
+<li>For every pair of field trees and every pair of scan trees with similar DBH and similar distance between them, the program creates a hypothesis: a rotation and shift that puts one pair on the other.</li>
+<li>Every hypothesis is scored: for each field tree the nearest scan tree is found; cost = (distance / 5 m)² + (DBH difference / 4 cm)². A tree without a partner costs 9.</li>
+<li>The 60 best hypotheses are refined with the Kabsch method (best rotation and shift for pairs of points) and re-pairing, as in the ICP algorithm.</li>
+<li>If there is a second, differently rotated (more than 25°) hypothesis that is almost as good, the result is rated “uncertain”.</li>
+</ol>
+<h2>How accurate it is</h2>
+<p>A test with 5 trees and 40 random trials at different GPS errors: with a 2 m error and trees spread 6–14 m from the centre the rotation was correct (error below 15°) in 39 of 40 trials, median error 3.5°. With trees clustered near the centre: 32 of 40. With a 5 m GPS error: 12 and 6 of 40 respectively. Therefore: average the GPS position and choose trees that are spread out and have different DBH.</p>
+<div class="box"><b class="t">Algorithms</b>Kabsch 1976 (rotation via SVD), Umeyama 1991, ICP: Besl and McKay 1992, projection: Krüger 1912, Karney 2011.</div>
+
+<h1>7. Scanner path, terrain model and walk-through animation</h1>
+<p>A handheld (SLAM) scanner computes its position at every moment and saves it as a path (trajectory): a series of x, y, z points, often with time. The path is in the same coordinate system as the cloud, because the cloud is built from these positions. The program does not need it, but when it is there, it knows from where every tree was seen.</p>
+<h2>Finding and reading the file</h2>
+<ol>
+<li><b>Search</b> (module <code>lts_sciezka.py</code>): first the file chosen in the window, then <code>01_RAPORT\&lt;scan&gt;_sciezka.*</code>, then files with traj, sciezka, path, odom, pose, track in the name and with the scan code (from <code>_N0h__r25</code> the code is <code>n0h</code>), next to the scan and one folder up.</li>
+<li><b>Reading:</b> LAS/LAZ through laspy (GPS time, if it changes), PLY text and binary (own header reader), text files: comments skipped, separator (semicolon, tab, comma, spaces) and decimal comma detected, columns by header name (<code>x</code>, <code>px</code>, <code>pos_x</code>, <code>easting</code>, <code>field.pose.pose.position.x</code> and others). Without a header: 12 columns is the KITTI format (3×4 matrix, position in columns 4, 8 and 12), an increasing first column is time (TUM format), otherwise the first three columns are x y z.</li>
+<li><b>Check:</b> the path must pass through the scan area (with a 30 m margin). Otherwise it is in another coordinate system and the program skips it.</li>
+</ol>
+<h2>Visibility of a tree from the path</h2>
+<p>For every stem the program computes the smallest horizontal distance to the path and the coverage: it divides the circle around the stem into 36 sectors of 10° and marks a sector if any path point lies in that direction closer than 15 m. Coverage is the percentage of marked sectors. A tree passed on one side has about 30–50 %, a tree walked around 100 %.</p>
+<p>Why: a DBH from a circle fitted to an arc seen from one side only is less certain (a 90° arc allows many different circles), and points far from the scanner are noisier. Trees farther than 12 m from the path are counted separately in the summary. The program does not remove them automatically, because with good visibility they may be measured well. It is information for the tree review.</p>
+<h2>Terrain model</h2>
+<ol>
+<li>The ground height under every cloud point is z − (height above ground from stage 1). The mean of these values in 0.25 m cells gives a grid (module <code>lts_dtm.py</code>). Holes up to 1 m are filled from the nearest cell (distance transform).</li>
+<li>Slope and aspect are computed from derivatives of the grid smoothed with a Gaussian filter (σ = 0.75 m, ignoring empty cells). Without smoothing small steps gave slopes above 45° on flat ground. Slope = arctan(√((∂z/∂x)² + (∂z/∂y)²)), aspect = direction the slope faces, from north.</li>
+<li>The dominant aspect in the summary is a circular mean weighted by slope (flat places have almost no influence), rounded to 8 directions.</li>
+<li>Hillshade (light from the north-west at 45°) and contours (marching squares from matplotlib) come from the same grid. Contour interval: 0.25 m with relief below 3 m, 0.5 m below 10 m, otherwise 1 m.</li>
+<li>Saving to GeoPackage without extra libraries: rasters as 256 × 256 PNG tiles (GeoPackage tiles standard), elevation and slope with the 2D gridded coverage extension (16-bit PNG with scale and offset), so QGIS shows real values in every pixel.</li>
+</ol>
+<h2>GeoPackage and QGIS</h2>
+<ol>
+<li><b>Thinning slice points.</b> Every point goes into a 1 cm cell (part “stem”) or a 4 cm cell (branches, leaves, understory) and one point is kept per cell. This is an ordinary 2D voxel grid, computed separately for each part, so bark does not mix with branches. 1 cm is smaller than the noise of a handheld scanner (1–2 cm), so the fitted circle does not change; the bark arc stays continuous and you can see what part of the circumference the scanner covered.</li>
+<li><b>Distance from the circle</b> (<code>odl_od_okregu_cm</code>) is |distance of the point from the centre − radius|. Bark points usually have 0–2 cm; many points a few centimetres from the circle mean a branch, a shrub at the stem or an irregular stem.</li>
+<li><b>Coordinate system.</b> GeoPackage allows an “undefined Cartesian” system (srs −1), but QGIS treats it as degrees in a project: the scale came out around 1:30,000,000 and layers hidden by scale disappeared. So a scan without a coordinate system gets its own engineering system LOCAL_CS in metres (identifier 990001). A scan with an EPSG system keeps it.</li>
+<li><b>Styles</b> are saved in the <code>layer_styles</code> table (the standard QGIS way of a default style in a GeoPackage) as QML text. Trees: categories by species, size max(1.4; DBH/18) mm. Contours: rules by the field <code>glowna</code>. Slice points: visible only from scale 1:400. Rasters: elevation and slope with a colour ramp.</li>
+<li>The <b>.qgs project</b> is an XML file with paths relative to the <code>.gpkg</code>, so it works after moving the whole folder. The map extent is the extent of trees and crowns plus 3 m.</li>
+</ol>
+<h2>Walk-through animation</h2>
+<p>The 3D view gets the path simplified to a point every 0.25 m. For every 1 m cell of the cloud the program finds the first path point closer than 10 m (k-d tree) and orders the cloud points in that sequence. The browser then shows only the beginning of the point array, longer and longer as the scanner moves, so the animation is smooth even with 600,000 points. This is a simplification: a real scanner sees farther than 10 m, but sees hidden places later, so 10 m reflects the scanning order well.</p>
+<div class="box"><b class="t">Algorithms</b>Visibility sectors: our own. Distance transform: Danielsson 1980. Weighted Gaussian filter (normalized convolution): Knutsson and Westin 1993. Slope and aspect: Horn 1981. Contours: marching squares, Lorensen and Cline 1987. k-d tree: Bentley 1975.</div>
+
+<h1>8. List of algorithms</h1>
+<table>
+<tr><th>Algorithm</th><th>Where</th><th>What for</th><th>Source</th></tr>
+<tr><td>Voxel grid</td><td>stage 1 step 1, stage 2, graph, slice points in GeoPackage</td><td>thinning the cloud</td><td>Rusu and Cousins 2011</td></tr>
+<tr><td>Statistical Outlier Removal (SOR)</td><td>stage 1 step 2</td><td>noise removal</td><td>Rusu et al. 2008</td></tr>
+<tr><td>k-d tree</td><td>everywhere</td><td>fast neighbour search</td><td>Bentley 1975</td></tr>
+<tr><td>Grid minimum + connected components</td><td>stage 1 step 3</td><td>terrain model</td><td>own; Hopcroft and Tarjan 1973</td></tr>
+<tr><td>Interpolation on a Delaunay triangulation</td><td>stage 1 step 4</td><td>height above ground</td><td>Delaunay 1934; Barber et al. 1996</td></tr>
+<tr><td>PCA (normals, eigenvalue features)</td><td>stage 1 step 5, stage 2 step 3</td><td>vertical stem walls; neighbourhood shape</td><td>Hoppe et al. 1992; Demantké et al. 2011; Weinmann et al. 2015</td></tr>
+<tr><td>DBSCAN</td><td>stage 1 step 5, stage 2 step 2</td><td>grouping points in a slice</td><td>Ester et al. 1996</td></tr>
+<tr><td>Kåsa circle fit</td><td>stages 1 and 2</td><td>stem diameter</td><td>Kåsa 1976</td></tr>
+<tr><td>RANSAC (with centre penalty and axis anchor)</td><td>stages 1, 2 and 3</td><td>circles robust to branches and shrubs</td><td>Fischler and Bolles 1981</td></tr>
+<tr><td>Joining circles into chains</td><td>stage 1 step 5</td><td>stem from circles</td><td>own</td></tr>
+<tr><td>Cylinder fit to stacked slice circles</td><td>stage 3, cylinder check</td><td>removing false trees, DBH from the cylinder</td><td>own; RANSAC: Fischler and Bolles 1981</td></tr>
+<tr><td>Jaccard similarity</td><td>stage 1 (“stem wall”)</td><td>diagnostics</td><td>Jaccard 1912</td></tr>
+<tr><td>Multi-source Dijkstra on a k-NN graph</td><td>stage 1 step 6</td><td>assigning points to trees</td><td>Dijkstra 1959; Tao et al. 2015</td></tr>
+<tr><td>Random forest, self-training</td><td>stage 2 step 4</td><td>wood or leaf</td><td>Breiman 2001; Yarowsky 1995</td></tr>
+<tr><td>Connected components</td><td>stage 2 step 5</td><td>crown clean-up</td><td>Hopcroft and Tarjan 1973</td></tr>
+<tr><td>Rules with voting</td><td>stage 2</td><td>species group, stem check, understory</td><td>own</td></tr>
+<tr><td>2D occupancy grid + height layers, morphology, component labelling, split by local maxima</td><td>stage 3, shrubs</td><td>shrubs as objects</td><td>own; morphology: Serra 1982</td></tr>
+<tr><td>Second stem tracking after removing the main stem</td><td>stage 2, before stem tracking</td><td>splitting fused trees</td><td>own; RANSAC: Fischler and Bolles 1981</td></tr>
+<tr><td>Näslund curve, Levenberg–Marquardt</td><td>report</td><td>choice of DBH, check</td><td>Näslund 1936; Marquardt 1963</td></tr>
+<tr><td>V = g·h·f, truncated cones</td><td>report</td><td>volume</td><td>Husch et al. 2003; West 2009</td></tr>
+<tr><td>Kabsch, ICP, Krüger series</td><td>field measurement</td><td>matching and coordinates</td><td>Kabsch 1976; Besl and McKay 1992; Krüger 1912</td></tr>
+<tr><td>Visibility sectors from the path</td><td>scanner path</td><td>which side of the stem was seen</td><td>own</td></tr>
+<tr><td>Weighted Gaussian, grid derivatives, marching squares</td><td>terrain model</td><td>slope, aspect, hillshade, contours</td><td>Knutsson and Westin 1993; Horn 1981; Lorensen and Cline 1987</td></tr>
+<tr><td>IoU + Hungarian algorithm</td><td>method comparison (program 20)</td><td>segmentation evaluation</td><td>Kuhn 1955</td></tr>
+</table>
+
+<h1>9. Parameters and stand classes</h1>
+<p>The stand class changes several parameters at once. The numbers are in <code>klasy_drzewostanu.csv</code> (open in Excel or Notepad). The “automatic” class changes nothing in stage 1, and in stage 2 chooses the class from the median DBH (below 20 cm: young).</p>
+<table>
+<tr><th>Parameter</th><th>Young</th><th>Mature</th><th>What it does</th></tr>
+<tr><td>Smallest stem diameter</td><td>4.8 cm</td><td>6 cm</td><td>thinner circles are not a stem (stage 1)</td></tr>
+<tr><td>Largest stem diameter</td><td>40 cm</td><td>120 cm</td><td>thicker point groups are not a stem (stage 1)</td></tr>
+<tr><td>DBH threshold in the report</td><td>7 cm</td><td>7 cm</td><td>thinner trees are left out of the results</td></tr>
+<tr><td>Shrub height</td><td>5 m</td><td>10 m</td><td>full inside and lower = shrub</td></tr>
+<tr><td>Understory up to height</td><td>1.5 m</td><td>3.0 m</td><td>lower branches away from the stem = understory</td></tr>
+<tr><td>Understory from distance</td><td>0.6 m</td><td>1.0 m</td><td>as above</td></tr>
+<tr><td>Farthest from the stem (simple method)</td><td>5 m</td><td>8 m</td><td>only a fallback when the graph does not work</td></tr>
+</table>
+<h2>Main fixed parameters</h2>
+<table>
+<tr><th>Parameter</th><th>Value</th><th>Where</th></tr>
+<tr><td>Input voxel</td><td>1 cm</td><td>stage 1 step 1</td></tr>
+<tr><td>SOR: neighbours, threshold</td><td>12, 2.5 σ</td><td>stage 1 step 2</td></tr>
+<tr><td>Terrain model cell</td><td>0.5 m</td><td>stage 1 step 3</td></tr>
+<tr><td>Stem search</td><td>0.5–6 m every 0.25 m, second pass 2.5–8.5 m</td><td>stage 1 step 5</td></tr>
+<tr><td>Circle: error, coverage, hollowness</td><td>≤ 4 cm, ≥ 90°, ≥ 0.80</td><td>stage 1 step 5</td></tr>
+<tr><td>Min. stem length</td><td>6 slices = 1.5 m</td><td>stage 1 step 5</td></tr>
+<tr><td>Graph: voxel, neighbours, edge, horizontal penalty</td><td>0.3 m, 20, 1 m, ×4 (i.e. ×2 distance)</td><td>stage 1 step 6</td></tr>
+<tr><td>Min. slenderness</td><td>25</td><td>stage 1 filter</td></tr>
+<tr><td>Stem cross-sections</td><td>every 20 cm</td><td>stage 2</td></tr>
+<tr><td>Feature voxel, neighbours</td><td>2.5 cm; 12 and 40</td><td>stage 2</td></tr>
+<tr><td>Wood threshold</td><td>0.5</td><td>stage 2</td></tr>
+<tr><td>Cylinder check: band, slice, search radius</td><td>0.6–3.0 m, 0.25 m, 0.8 m</td><td>stage 3</td></tr>
+<tr><td>Form factors</td><td>spruce 0.47, beech 0.51</td><td>report</td></tr>
+<tr><td>GPS: position σ, DBH σ</td><td>5 m, 4 cm</td><td>field measurement</td></tr>
+</table>
+
+<h1>10. Columns and indicators in Excel</h1>
+<p>The report <code>&lt;scan&gt;_REPORT.xlsx</code> has the sheets Summary, Trees, (Shrubs), (Field measurement), Settings and Explanations. Columns of the Trees sheet:</p>
+<table>
+<tr><th>Column</th><th>Meaning</th></tr>
+<tr><td>Tree no.</td><td>the same number as in the clouds, on the images <code>drzewo_NNN.png</code> and in the 3D view</td></tr>
+<tr><td>X, Y [m]</td><td>stem position in the scan coordinate system</td></tr>
+<tr><td>DBH D1.3 [cm]</td><td>DBH after the choice (chapter 5); g and V are computed from it</td></tr>
+<tr><td>Tree height H [m]</td><td>highest point of the tree above ground</td></tr>
+<tr><td>Basal area g [m²]</td><td>π/4 · D²</td></tr>
+<tr><td>Merchantable volume V [m³]</td><td>formula of the species; for a snag the measured stem</td></tr>
+<tr><td>Slenderness h/d</td><td>height / DBH</td></tr>
+<tr><td>Distance from scanner path [m]</td><td>smallest horizontal distance of the stem from the path (when there is a path file)</td></tr>
+<tr><td>Path coverage [%]</td><td>share of the 36 sectors around the stem in which the path was closer than 15 m</td></tr>
+<tr><td>Detected from above</td><td>“yes”: stem found only in the search at 2.5–8.5 m</td></tr>
+<tr><td>Reviewed manually</td><td>“yes”: your decision from the 3D view</td></tr>
+<tr><td>Species, Species – source</td><td>species for the volume formula and its source: default / detected (preliminary) / whole plot / scanner tag (code) / entered manually / reviewed manually</td></tr>
+<tr><td>Species group confidence [%]</td><td>how clearly the rules pointed to the group</td></tr>
+<tr><td>Crown base height [m]</td><td>height at which the crown begins</td></tr>
+<tr><td>DBH notes</td><td>explanations: uncertain (part of the circumference visible), shrub, snag, no stem, DBH from stage 2, check the image…</td></tr>
+<tr><td>Stage 2 DBH and its source</td><td>the second, independent DBH (measured or reconstructed), for comparison</td></tr>
+<tr><td>Stem visible from/to, base reconstructed from/to</td><td>extent of the measured and reconstructed stem</td></tr>
+<tr><td>Volume of measured stem section</td><td>sum of truncated cones, without the top</td></tr>
+<tr><td>Stem / Branches / Foliage [% pts]</td><td>share of the tree's points in each class</td></tr>
+<tr><td>Number of points</td><td>how many cloud points belong to the tree</td></tr>
+</table>
+<p>Colours: blue background = value from a reconstructed stem base; yellow = there is a DBH note. Shrubs and objects without a stem are grey below the table and are not included in totals.</p>
+
+<h1>11. Accuracy: what we know from tests</h1>
+<h2>Tree detection (segmentation) against a manual reference</h2>
+<p>A tree counts as found when its points overlap a reference tree by at least half (IoU ≥ 0.5). Recall says how many real trees were found, precision how many of the found ones are real trees. Two manually segmented mobile laser scans of mountain forest were used.</p>
+<table>
+<tr><th>Plot</th><th>Method</th><th>F1</th><th>Recall</th><th>Precision</th><th>Mean IoU</th></tr>
+<tr><td>A (36 trees)</td><td>stage 1 (tree_segmenter_tool)</td><td>76.7</td><td>63.9 %</td><td>95.8 %</td><td>0.81</td></tr>
+<tr><td>A</td><td>3DFin (for comparison)</td><td>63.0</td><td>47.2 %</td><td>94.4 %</td><td>0.79</td></tr>
+<tr><td>B (113 trees incl. regeneration)</td><td>stage 1 (tree_segmenter_tool)</td><td>61.5</td><td>53.1 %</td><td>73.2 %</td><td>0.69</td></tr>
+</table>
+<p>The program rarely invents trees but misses some real ones; most of the “missed” ones are found, only the crown is mixed with a neighbour (IoU 0.3–0.45). Of the 84 trees taller than 15 m on plot B, 83 % have IoU ≥ 0.3. Regeneration (low trees) is almost not detected (10 %).</p>
+<h2>DBH and height</h2>
+<ul>
+<li>DBH measured on plot B: RMSE 2.8 cm (recorded in the code).</li>
+<li>Stage 2 found the stem in 35 of 36 trees (A) and 105 of 113 (B). Stage 2 DBH agrees with stage 1: median difference 1.9 cm (52 trees on B); about 6 trees differ by more than 15 cm, and these are now decided by the height curve.</li>
+<li>RANSAC anchor on the stem axis: DBH overestimation +12 cm → +2.6 cm.</li>
+<li>Graph segmentation: height RMSE 3.32 m → 1.06 m, mean overestimation +0.94 m (overhanging branches of neighbours).</li>
+<li>Area from the 25 cm grid: overestimation about 2 %.</li>
+<li>Synthetic test plot (sanity check only, it is much easier than a real forest): all 28 trees found, DBH within ±0.2 cm of the true value.</li>
+</ul>
+<div class="box warn"><b class="t">Not verified yet</b>The branches / foliage split, species recognition and form factors on trees measured in the field. When you have a control measurement (DBH with a tape, height with a height meter, species), the “Field measurement” sheet shows the differences and the parameters can be tuned.</div>
+
+<h1>12. Limitations</h1>
+<ul>
+<li><b>Interlocking crowns:</b> graph segmentation leaves about +0.9 m height overestimation on average; machine learning methods trained on labelled trees would do better.</li>
+<li><b>Dense understory up to 2 m</b> can produce false stems or hide real ones (partly helped by the search from above, the stem checks, the cylinder check and the height curve).</li>
+<li><b>Strongly leaning and multi-stemmed trees:</b> the assumption “stem = vertical pole” breaks; the lean correction is an approximation. A second stem is split only when it can be tracked for at least 4 m.</li>
+<li><b>Shrubs:</b> thresholds (3 layers, 0.8 m, 0.5 m²) set on one plot; in a dense thicket they may join several shrubs into one or take young trees for shrubs.</li>
+<li><b>DBH is not extended downwards</b> when the stem is hidden at 1.3 m (deliberately: extending gave large errors). Then stage 2 provides the DBH or it stays empty.</li>
+<li><b>Species from shape</b> is preliminary; in a dense stand use “spruce only / beech only” or the tree review.</li>
+<li><b>Wood / leaf split</b> not verified numerically.</li>
+<li><b>Stem check, cylinder check and snags</b> are rules with thresholds set on a few plots; they can be wrong on unusual trees (e.g. very young spruces densely branched down to the ground).</li>
+<li><b>Form factors</b> are approximate, to be replaced with regional tables.</li>
+<li><b>Terrain model</b> is simple: good for terrestrial scans, not for airborne ones; tree height farther than 4 m from visible ground is uncertain.</li>
+<li><b>GPS under a canopy</b> is off by several metres; the matching can be ambiguous (rating “uncertain”).</li>
+<li><b>A large scan</b> (40 million points or more) needs about 8 GB of free memory.</li>
+</ul>
+
+<h1>13. References</h1>
+<div class="refs">
+<p>Andrew A.M. (1979) Another efficient algorithm for convex hulls in two dimensions. Information Processing Letters 9(5): 216–219.</p>
+<p>Barber C.B., Dobkin D.P., Huhdanpaa H. (1996) The Quickhull algorithm for convex hulls. ACM Transactions on Mathematical Software 22(4): 469–483.</p>
+<p>Bentley J.L. (1975) Multidimensional binary search trees used for associative searching. Communications of the ACM 18(9): 509–517.</p>
+<p>Besl P.J., McKay N.D. (1992) A method for registration of 3-D shapes. IEEE Transactions on Pattern Analysis and Machine Intelligence 14(2): 239–256.</p>
+<p>Breiman L. (2001) Random forests. Machine Learning 45(1): 5–32.</p>
+<p>Curtis R.O., Marshall D.D. (2000) Why quadratic mean diameter? Western Journal of Applied Forestry 15(3): 137–139.</p>
+<p>Danielsson P.-E. (1980) Euclidean distance mapping. Computer Graphics and Image Processing 14(3): 227–248.</p>
+<p>Delaunay B. (1934) Sur la sphère vide. Izvestia Akademii Nauk SSSR 7: 793–800.</p>
+<p>Demantké J., Mallet C., David N., Vallet B. (2011) Dimensionality based scale selection in 3D lidar point clouds. ISPRS Archives XXXVIII-5/W12.</p>
+<p>Dijkstra E.W. (1959) A note on two problems in connexion with graphs. Numerische Mathematik 1: 269–271.</p>
+<p>Ester M., Kriegel H.-P., Sander J., Xu X. (1996) A density-based algorithm for discovering clusters in large spatial databases with noise. Proc. KDD-96: 226–231.</p>
+<p>Fischler M.A., Bolles R.C. (1981) Random sample consensus. Communications of the ACM 24(6): 381–395.</p>
+<p>Hackenberg J., Spiecker H., Calders K., Disney M., Raumonen P. (2015) SimpleTree – an efficient open source tool to build tree models from TLS clouds. Forests 6(11): 4245–4294.</p>
+<p>Hopcroft J., Tarjan R. (1973) Algorithm 447: Efficient algorithms for graph manipulation. Communications of the ACM 16(6): 372–378.</p>
+<p>Hoppe H., DeRose T., Duchamp T., McDonald J., Stuetzle W. (1992) Surface reconstruction from unorganized points. Computer Graphics 26(2): 71–78.</p>
+<p>Horn B.K.P. (1981) Hill shading and the reflectance map. Proceedings of the IEEE 69(1): 14–47.</p>
+<p>Husch B., Beers T.W., Kershaw J.A. (2003) Forest Mensuration. 4th ed., Wiley.</p>
+<p>Jaccard P. (1912) The distribution of the flora in the alpine zone. New Phytologist 11(2): 37–50.</p>
+<p>Kabsch W. (1976) A solution for the best rotation to relate two sets of vectors. Acta Crystallographica A32: 922–923.</p>
+<p>Karney C.F.F. (2011) Transverse Mercator with an accuracy of a few nanometers. Journal of Geodesy 85(8): 475–485.</p>
+<p>Knutsson H., Westin C.-F. (1993) Normalized and differential convolution. Proceedings CVPR 1993: 515–523.</p>
+<p>Krishna Moorthy S.M., Calders K., Vicari M.B., Verbeeck H. (2020) Improved supervised learning-based approach for leaf and wood classification from LiDAR point clouds of forests. IEEE Transactions on Geoscience and Remote Sensing 58(5): 3057–3070.</p>
+<p>Krüger L. (1912) Konforme Abbildung des Erdellipsoids in der Ebene. Veröffentlichung des Königlich Preussischen Geodätischen Institutes, N.F. 52.</p>
+<p>Kuhn H.W. (1955) The Hungarian method for the assignment problem. Naval Research Logistics Quarterly 2: 83–97.</p>
+<p>Kåsa I. (1976) A circle fitting procedure and its error analysis. IEEE Transactions on Instrumentation and Measurement IM-25(1): 8–14.</p>
+<p>Levenberg K. (1944) A method for the solution of certain non-linear problems in least squares. Quarterly of Applied Mathematics 2: 164–168.</p>
+<p>Lorensen W.E., Cline H.E. (1987) Marching cubes: a high resolution 3D surface construction algorithm. Computer Graphics 21(4): 163–169.</p>
+<p>Marquardt D.W. (1963) An algorithm for least-squares estimation of nonlinear parameters. Journal of the Society for Industrial and Applied Mathematics 11(2): 431–441.</p>
+<p>Näslund M. (1936) Skogsförsöksanstaltens gallringsförsök i tallskog. Meddelanden från Statens Skogsförsöksanstalt 29.</p>
+<p>Raumonen P., Kaasalainen M., Åkerblom M., Kaasalainen S., Kaartinen H., Vastaranta M., Holopainen M., Disney M., Lewis P. (2013) Fast automatic precision tree models from terrestrial laser scanner data. Remote Sensing 5(2): 491–520.</p>
+<p>Rusu R.B., Cousins S. (2011) 3D is here: Point Cloud Library (PCL). IEEE ICRA 2011.</p>
+<p>Rusu R.B., Marton Z.C., Blodow N., Dolha M., Beetz M. (2008) Towards 3D point cloud based object maps for household environments. Robotics and Autonomous Systems 56(11): 927–941.</p>
+<p>Serra J. (1982) Image Analysis and Mathematical Morphology. Academic Press.</p>
+<p>Tao S., Wu F., Guo Q. et al. (2015) Segmenting tree crowns from terrestrial and mobile LiDAR data by exploring ecological theories. ISPRS Journal of Photogrammetry and Remote Sensing 110: 66–76.</p>
+<p>Umeyama S. (1991) Least-squares estimation of transformation parameters between two point patterns. IEEE TPAMI 13(4): 376–380.</p>
+<p>Vicari M.B., Disney M., Wilkes P., Burt A., Calders K., Woodgate W. (2019) Leaf and wood classification framework for terrestrial LiDAR point clouds. Methods in Ecology and Evolution 10(5): 680–694.</p>
+<p>Wang D. (2020) Unsupervised semantic and instance segmentation of forest point clouds. ISPRS Journal of Photogrammetry and Remote Sensing 165: 86–97.</p>
+<p>Wang D., Momo Takoudjou S., Casella E. (2020) LeWoS: A universal leaf-wood classification method to facilitate the 3D modelling of large tropical trees using terrestrial LiDAR. Methods in Ecology and Evolution 11(3): 376–389.</p>
+<p>Weinmann M., Jutzi B., Hinz S., Mallet C. (2015) Semantic point cloud interpretation based on optimal neighborhoods, relevant features and efficient classifiers. ISPRS Journal of Photogrammetry and Remote Sensing 105: 286–304.</p>
+<p>West P.W. (2009) Tree and Forest Measurement. 2nd ed., Springer.</p>
+<p>Yarowsky D. (1995) Unsupervised word sense disambiguation rivaling supervised methods. Proc. ACL 1995: 189–196.</p>
+<p style="padding-left:0;text-indent:0;color:#5b6670">The references were chosen for the algorithms actually used in the code. The publication details of Näslund 1936, Delaunay 1934 and Tao et al. 2015 are worth checking before citing them in scientific work.</p>
+</div>
+</body></html>

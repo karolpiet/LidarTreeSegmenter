@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Point clouds and scan data (too large for git, may be private)
+*.las
+*.laz
+*.ply
+*.e57
+*.xyz
+*.pts
+*.npz
+
+# Results and working folders
+wyniki/
+metody/
+porownanie/
+_robocze/
+_stare_programy/
+_tymczasowe*/
+tree_segmenter_tool/data/
+tree_segmenter_tool/results/
+docs/KURS_PYTHONA/wyniki_kursu/
+
+# OS / editors
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/

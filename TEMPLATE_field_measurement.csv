@@ -1,0 +1,21 @@
+# LidarTreeSegmenter - field measurement of a few trees (e.g. 5 trees with a Garmin GPS)
+# Save a copy of this file as <scan_name>_field.csv, e.g. _S4v__r20_field.csv,
+# in the scan's results folder (01_RAPORT) or next to the scan file, and run the report.
+# Lines starting with # are skipped - you can delete them.
+#
+# nr        - your tree number (any number, it does not have to match the LidarTreeSegmenter numbers)
+# lat       - latitude from the Garmin, e.g. 49.61234 or N49 36.740
+# lon       - longitude, e.g. 19.51234 or E19 30.740
+# dbh_cm    - DBH (diameter at breast height, 1.3 m) in cm (important - trees are matched by it)
+# species   - spruce / beech / other (optional)
+# height_m  - tree height in m (optional)
+#
+# Instead of lat/lon you can give the columns x;y;epsg (e.g. EPSG 2180).
+# You can also save the Garmin waypoints as <scan_name>_field.gpx
+# (waypoint names = tree numbers) and enter only nr and dbh_cm here.
+nr;lat;lon;dbh_cm;species;height_m
+1;49.612340;19.512340;34;spruce;27
+2;49.612410;19.512460;41;spruce;
+3;49.612280;19.512500;28;beech;24
+4;49.612200;19.512310;52;spruce;
+5;49.612350;19.512180;19;beech;

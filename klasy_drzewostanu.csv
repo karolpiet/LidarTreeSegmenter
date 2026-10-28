@@ -1,0 +1,9 @@
+﻿# STAND CLASSES - settings for young and mature stands. You can edit this file in Excel or Notepad.
+# piersnica_od_cm / piersnica_do_cm - typical DBH range: the program uses it to decide which stem circles to look for
+# prog_piersnicy_cm - thinner trees are left out of the results
+# wysokosc_krzewu_m - an object with points inside its cross-section that is lower than this is treated as a shrub
+# podszyt_do_m, podszyt_odleglosc_m - points lower than podszyt_do_m and farther from the stem than podszyt_odleglosc_m are understory, not tree branches (0 = off)
+# opis / opis_en - description in Polish / English. Keep the class names (młody = young, dojrzały = mature) and the column names as they are.
+klasa;opis;piersnica_od_cm;piersnica_do_cm;prog_piersnicy_cm;wysokosc_krzewu_m;podszyt_do_m;podszyt_odleglosc_m;opis_en
+młody;Drzewostan młody, pierśnice około 8–20 cm;8;20;7;5;1.5;0.6;Young stand, DBH about 8–20 cm
+dojrzały;Drzewostan dojrzały, pierśnice powyżej 20 cm;20;120;7;10;3.0;1.0;Mature stand, DBH above 20 cm

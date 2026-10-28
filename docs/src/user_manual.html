@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>LidarTreeSegmenter – User manual</title>
+<link rel="stylesheet" href="style.css"></head><body>
+
+<section class="cover">
+  <div class="t1">LidarTreeSegmenter</div>
+  <div class="t2">User manual, step by step</div>
+  <div class="t3">trees · DBH · heights · timber volume · stem / branches / foliage<br>from terrestrial and mobile laser scans (TLS / MLS)</div>
+  <p style="margin-top:12mm">This manual is for someone who is working with a laser scan and with Python for the first time. How the program computes everything inside is described in a separate document, <b>How it works</b> (<code>docs/how_it_works.pdf</code>).</p>
+  <p class="t3">The screenshots and figures were made on a synthetic test plot (30 × 30 m, 28 trees) that you can generate yourself, see chapter 3.</p>
+</section>
+
+<section class="toc"><h1>Contents</h1>
+<ol>
+<li>What LidarTreeSegmenter does and what you need</li>
+<li>Installation (once)</li>
+<li>Processing your first scan</li>
+<li>What the window shows while processing</li>
+<li>Where the results are</li>
+<li>The Excel report</li>
+<li>Tree images</li>
+<li>3D view in the browser</li>
+<li>Reviewing trees and “Recalculate report”</li>
+<li>Tree species</li>
+<li>Overnight queue (many scans at once)</li>
+<li>Field measurement and GPS matching</li>
+<li>GeoPackage in QGIS</li>
+<li>Scanner path, terrain and the scanner walk-through</li>
+<li>English and Polish versions</li>
+<li>Frequent problems (FAQ)</li>
+<li>Glossary</li>
+</ol></section>
+
+<h1>1. What LidarTreeSegmenter does and what you need</h1>
+<p>A terrestrial or mobile laser scanner records a forest as a <b>point cloud</b>: millions of points, each one a single laser reflection from bark, a needle, a branch or the ground. The file has the extension <code>.laz</code> (compressed) or <code>.las</code>.</p>
+<p>LidarTreeSegmenter takes such a file and by itself:</p>
+<ul>
+<li>finds the trees and measures their DBH (stem diameter at 1.3 m) and height;</li>
+<li>splits every tree into stem, branches and foliage, and marks shrubs near the ground as understory;</li>
+<li>tells trees apart from shrubs and snags (broken trees), and removes false trees that have no real stem;</li>
+<li>computes timber volume and stand indicators per hectare (N/ha, G/ha, V/ha, Dg, Lorey's height);</li>
+<li>writes an Excel report, a map for QGIS (GeoPackage), an image of every tree and a 3D view for the browser.</li>
+</ul>
+<h2>What you need</h2>
+<table>
+<tr><th>What</th><th>Notes</th></tr>
+<tr><td>A Windows computer</td><td>16 GB of RAM is best. A scan of up to about 20 million points works with 8 GB. The Python scripts also run on Linux and macOS from the command line.</td></tr>
+<tr><td>Python 3.10 or newer</td><td>Free, from python.org. Installation is described in chapter 2.</td></tr>
+<tr><td>A <code>.laz</code> or <code>.las</code> scan</td><td>Ideally cropped to the sample plot (for example a circle with a 20 m radius).</td></tr>
+<tr><td>A browser (Chrome, Edge, Firefox)</td><td>For the 3D view. No internet connection needed.</td></tr>
+<tr><td>Excel or LibreOffice</td><td>For the report. QGIS is optional (tree map).</td></tr>
+</table>
+
+<h1>2. Installation (once)</h1>
+<div class="step"><span class="n">1</span><h3>Install Python</h3></div>
+<p>Go to python.org → Downloads, download the Windows installer and run it. On the first screen of the installer tick <b>“Add Python to PATH”</b>, and only then click “Install Now”. Without this box Windows will not find Python and the program will not start.</p>
+<div class="box"><b class="t">How to check that Python works</b>Press the Windows key, type <code>cmd</code> and Enter. In the black window type <code>python --version</code>. If you see e.g. <code>Python 3.12.4</code>, everything is fine. If Windows opens the Microsoft Store or says it does not know the command, install Python again with “Add Python to PATH” ticked.</div>
+<div class="step"><span class="n">2</span><h3>Install the libraries</h3></div>
+<p>Open the program folder and double-click <code>INSTALL_ONCE.bat</code>. A black window opens and text scrolls for a few minutes (libraries are downloaded from the internet). When “Done” appears, press any key.</p>
+<p>The libraries are: <code>laspy</code> and <code>lazrs</code> (reading scans), <code>numpy</code>, <code>pandas</code>, <code>scipy</code> (computation), <code>scikit-learn</code> (machine learning), <code>matplotlib</code> (images) and <code>openpyxl</code> (Excel). They are listed in <code>requirements.txt</code>; on other systems install them with <code>python -m pip install -r requirements.txt</code>. If one is missing later, the program tries to install it by itself.</p>
+<div class="step"><span class="n">3</span><h3>Done</h3></div>
+<p>From now on you start the program with <code>LidarTreeSegmenter.bat</code>. You can make a desktop shortcut: right-click <code>LidarTreeSegmenter.bat</code> → Send to → Desktop (create shortcut).</p>
+<h2>What is in the program folder</h2>
+<table>
+<tr><td><code>LidarTreeSegmenter.bat</code></td><td>program window (start here)</td></tr>
+<tr><td><code>DRAG_SCAN_HERE.bat</code></td><td>processing without the window (drop a scan onto the file)</td></tr>
+<tr><td><code>INSTALL_ONCE.bat</code></td><td>library installation</td></tr>
+<tr><td><code>LidarTreeSegmenter_PL.bat</code>, <code>PRZECIAGNIJ_TU_SKAN.bat</code>, <code>ZAINSTALUJ_RAZ.bat</code></td><td>the same in Polish</td></tr>
+<tr><td><code>README.md</code></td><td>short description of everything</td></tr>
+<tr><td><code>klasy_drzewostanu.csv</code></td><td>settings for young and mature stands</td></tr>
+<tr><td><code>tablice_miazszosci.csv</code></td><td>volume formulas (can be replaced)</td></tr>
+<tr><td><code>TEMPLATE_field_measurement.csv</code></td><td>template for the field measurement file (GPS)</td></tr>
+<tr><td><code>docs\</code></td><td>this manual, “How it works”, Polish documentation and a Python course (Polish)</td></tr>
+<tr><td><code>tree_segmenter_tool\</code></td><td>tree detection used in stage 1, and a generator of a synthetic test plot</td></tr>
+<tr><td><code>program\</code></td><td>program code, no need to look inside</td></tr>
+<tr><td><code>wyniki\</code></td><td>created on the first run: the results of every scan</td></tr>
+</table>
+
+<h1>3. Processing your first scan</h1>
+<div class="box"><b class="t">No scan of your own yet?</b>Generate a synthetic plot (30 × 30 m with trees of known DBH and height): open a console in the program folder and type <code>python tree_segmenter_tool\90_make_test_forest.py</code>. The scan appears in <code>tree_segmenter_tool\data\las_testowy.laz</code>, and the true values in <code>las_testowy_prawda.csv</code>. Options: <code>--drzew 28</code> (number of trees), <code>--nazwa my_plot</code> (file name).</div>
+<div class="step"><span class="n">1</span><h3>Start the window</h3></div>
+<p>Double-click <code>LidarTreeSegmenter.bat</code>. The dark program window opens.</p>
+<figure><img src="fig/gui_empty.png"><figcaption>Fig. 1. The window right after starting. At the top: scan selection and the Start, Stop and Overnight queue buttons. Below them the Stand and Species lists and the optional scanner path.</figcaption></figure>
+<div class="step"><span class="n">2</span><h3>Choose the scan</h3></div>
+<p>Click <b>Choose scan…</b> and select a <code>.laz</code> or <code>.las</code> file. Faster: grab the scan file with the mouse and drop it onto <code>LidarTreeSegmenter.bat</code> in Explorer. The window opens with that scan and starts processing immediately (with the settings remembered for this scan, or the defaults).</p>
+<div class="step"><span class="n">3</span><h3>Set the stand class</h3></div>
+<table>
+<tr><th>Choice</th><th>When</th><th>What it changes</th></tr>
+<tr><td>young</td><td>DBH usually 8–20 cm</td><td>looks for thinner stems; a shrub is an object lower than 5 m; understory up to 1.5 m</td></tr>
+<tr><td>mature</td><td>DBH above 20 cm</td><td>looks for thicker stems; a shrub is lower than 10 m; understory up to 3 m</td></tr>
+<tr><td>automatic</td><td>when you do not know</td><td>the program picks the class from the median DBH</td></tr>
+</table>
+<p>The exact numbers are in <code>klasy_drzewostanu.csv</code>. You can open it in Excel or Notepad and change them.</p>
+<div class="step"><span class="n">4</span><h3>Set the species</h3></div>
+<p><b>detect from shape</b>: the program guesses spruce or beech from the crown shape. <b>spruce only</b> or <b>beech only</b>: when you know that the plot has one species. If you know it, choose it: in a dense stand crowns overlap and shape-based recognition makes mistakes (in a pure spruce plot it can label a dozen spruces as beeches). The window remembers the stand class and species separately for every scan.</p>
+<div class="step"><span class="n">5</span><h3>Click ▶ Start</h3></div>
+<p>A scan of 15 million points takes about 25–35 minutes; the synthetic test plot takes about a minute. You can use the computer in the meantime, but do not close the window. <b>■ Stop</b> interrupts processing; whatever is already computed stays on disk.</p>
+<div class="box"><b class="t">The second time is faster</b>If the scan was processed before, the first stage (tree detection, the longest) is skipped. When you change the stand class or species, the program starts from the second stage.</div>
+
+<h1>4. What the window shows while processing</h1>
+<figure><img src="fig/gui_done.png"><figcaption>Fig. 2. The window after processing the test plot: all stages done, number of trees, share of stem, branches and foliage, and volume per hectare.</figcaption></figure>
+<table>
+<tr><th>Place</th><th>What is there</th></tr>
+<tr><td>Progress bar</td><td>percent of the whole run, time since start, and below it the name of the current step.</td></tr>
+<tr><td>List on the left</td><td>all stages in order: ✓ done, ● running, ○ waiting. Three groups: 1 trees and DBH, 2 stem / branches / foliage, 3 report and 3D view.</td></tr>
+<tr><td>Numbers top right</td><td>number of trees, mean share of stem, branch and foliage points, and finally the volume in m³/ha.</td></tr>
+<tr><td>Live preview</td><td>the cloud from above and from the side. It changes with the stage: after noise removal, height above ground, stems found (red circles), trees in colours, and at the end stem (brown), branches (light brown), foliage (green), understory (grey-blue).</td></tr>
+<tr><td>Tree images</td><td>second tab; shows the tree images as they are created.</td></tr>
+<tr><td>Log (bottom)</td><td>a text record of the run. <b>Copy log</b> copies it to the clipboard so you can paste it into a message (or to an AI assistant) when something goes wrong.</td></tr>
+<tr><td>Buttons at the bottom</td><td>become active when the given result is ready: Results folder, Tree images, Excel report, 3D view, Review trees, Recalculate report.</td></tr>
+</table>
+
+<h1>5. Where the results are</h1>
+<p>Every scan has its own folder <code>wyniki\&lt;scan name&gt;</code> (<i>wyniki</i> = results). The quickest way to open it is the <b>Results folder</b> button. Inside are subfolders and a <code>README.txt</code> describing every file. Folder names are Polish in both language versions.</p>
+<table>
+<tr><th>Subfolder</th><th>Main files</th><th>What for</th></tr>
+<tr><td><code>01_RAPORT</code> (report)</td><td><code>&lt;scan&gt;_REPORT.xlsx</code>, <code>00_SUMMARY.txt</code>, <code>&lt;scan&gt;.gpkg</code>, <code>&lt;scan&gt;.qgs</code>, <code>&lt;scan&gt;_species.csv</code>, <code>_sprawdzenie.csv</code>, <code>_field.csv</code></td><td>results to work with: Excel, map, your corrections</td></tr>
+<tr><td><code>02_CHMURY</code> (clouds)</td><td><code>_segmenty.laz</code>, <code>_czesci.laz</code></td><td>clouds for CloudCompare (tree number and tree part for every point)</td></tr>
+<tr><td><code>03_TABELE</code> (tables)</td><td><code>.csv</code> and <code>.json</code> files</td><td>intermediate tables, for the program and advanced users</td></tr>
+<tr><td><code>04_OBRAZY_DRZEW</code> (tree images)</td><td><code>drzewo_001.png</code>, <code>drzewo_002.png</code> …</td><td>an image of every tree for checking</td></tr>
+<tr><td><code>05_DZIENNIK</code> (log)</td><td><code>dziennik_*.txt</code></td><td>record of the run</td></tr>
+<tr><td><code>06_WIDOK_3D</code> (3D view)</td><td><code>_cloud_3d.html</code>, <code>_review.html</code></td><td>3D cloud in the browser</td></tr>
+</table>
+<p>The tree number is the same everywhere: in Excel, on the image, in the 3D view and in QGIS.</p>
+
+<h1>6. The Excel report</h1>
+<p>The <b>Excel report</b> button opens <code>01_RAPORT\&lt;scan&gt;_REPORT.xlsx</code>. It has several sheets (tabs at the bottom of Excel).</p>
+<h2>Sheet “Summary”</h2>
+<figure><img src="fig/excel_summary.png" style="width:75%"><figcaption>Fig. 3. The Summary sheet for the test plot: stand indicators and the DBH distribution.</figcaption></figure>
+<table>
+<tr><th>Row</th><th>Meaning</th></tr>
+<tr><td>Sample plot area</td><td>area of the scan in m² and ha, from the extent of the cloud.</td></tr>
+<tr><td>Number of trees per ha (N)</td><td>number of trees converted to one hectare.</td></tr>
+<tr><td>Mean DBH</td><td>plain average of the DBH values.</td></tr>
+<tr><td>Quadratic mean DBH (Dg)</td><td>DBH of the tree with the mean basal area; used in forestry more often than the plain mean.</td></tr>
+<tr><td>Lorey's height</td><td>mean height weighted by basal area: thick trees count more.</td></tr>
+<tr><td>Basal area (G)</td><td>sum of stem cross-section areas at 1.3 m, in m²/ha.</td></tr>
+<tr><td>Merchantable volume (V)</td><td>volume of wood thicker than 7 cm, in m³/ha. The formulas are in <code>tablice_miazszosci.csv</code>.</td></tr>
+<tr><td>Share of stem, branches, foliage</td><td>mean percentage of cloud points in each tree part.</td></tr>
+<tr><td>Trees with reconstructed stem base</td><td>stem hidden by understory, the base extended from the stem shape.</td></tr>
+<tr><td>Excluded as shrubs / Rejected – no stem / Snags</td><td>how many detected “trees” were left out as shrubs (solid cross-section instead of a stem), how many were rejected because the cylinder check found no stem there, and how many stayed as snags. These rows appear only when there is something to count.</td></tr>
+<tr><td>Shrubs (0.3–4 m)</td><td>number of shrubs, per hectare, the share of the plot they cover from above and their mean height. The list is in the Shrubs sheet.</td></tr>
+<tr><td>Split trees / forked</td><td>how many trees had a second separate stem and were split, and how many fork above 1.3 m (one tree).</td></tr>
+<tr><td>Trees detected only from above</td><td>stems found only above the understory (2.5–8.5 m).</td></tr>
+<tr><td>DBH distribution</td><td>number of trees in 4 cm diameter classes.</td></tr>
+</table>
+<h2>Sheet “Trees”</h2>
+<figure><img src="fig/excel_trees.png"><figcaption>Fig. 4. The beginning of the Trees sheet (first columns and rows). The table has further columns on stem, branches and foliage.</figcaption></figure>
+<p>Every row is one tree. The main columns: number (as on the image), position x, y, DBH [cm] and its source, height [m], species and where it comes from, volume [m³], share of stem / branches / foliage, Checked manually, Detected from above, and notes. The headers have a filter, so you can for example show only trees with notes.</p>
+<div class="box"><b class="t">Colours in the table</b>
+<b>Yellow DBH background</b>: the measurement has a note (e.g. only part of the circumference was visible); the reason is in the column “DBH notes”.<br>
+<b>Blue background</b>: the stem base was hidden and the DBH was reconstructed from the stem shape (source “reconstruction”).<br>
+<b>Grey rows below the table</b>: shrubs and objects without a stem. They are not included in totals or per-hectare values.<br>
+<b>Notes column</b>: what made the program uneasy: “uncertain”, “snag”, “check the image”, DBH chosen by the height curve.</div>
+<h2>Other sheets</h2>
+<p><b>Shrubs</b>: every shrub with its position, area from above [m²], height (95 % of shrub points lower) and highest point. <b>Settings</b>: the settings used, described in sentences. <b>Explanations</b>: what every column means. <b>Field measurement</b>: only when you add a field measurement file (chapter 12). The same summary is in plain text in <code>00_SUMMARY.txt</code> (opens in Notepad).</p>
+
+<h1>7. Tree images</h1>
+<p>The <b>Tree images</b> button opens the folder <code>04_OBRAZY_DRZEW</code>. Every tree has an image <code>drzewo_NNN.png</code> with the number used in Excel. The easiest way to browse them is with the arrow keys in the ordinary Windows photo viewer.</p>
+<figure><img src="fig/tree.png"><figcaption>Fig. 5. A tree image. Two side views (left axis: height above ground, bottom axis: distance from the stem axis, red line at 1.3 m) and the 1.3 m cross-section from above with a centimetre scale bar.</figcaption></figure>
+<p>Colours: brown stem, light brown branches, green foliage, grey-blue understory, blue reconstructed stem base. The title shows DBH, height, species and any warning (e.g. “PROBABLY A SHRUB”).</p>
+<div class="box"><b class="t">What to look at</b>
+<b>Cross-section on the right</b>: the red circle should lie on the bark points. A healthy stem is empty inside. If points fill the centre, it is more likely a shrub or a cluster of branches.<br>
+<b>Side views</b>: the brown stem should go straight up. If the tree has two tops or takes part of a neighbour's crown, note the number.<br>
+<b>Height</b>: a 6 m tree with a 70 cm DBH is a snag or a shrub, not a healthy tree.</div>
+
+<h1>8. 3D view in the browser</h1>
+<p>The <b>3D view</b> button opens <code>06_WIDOK_3D\&lt;scan&gt;_cloud_3d.html</code> in the browser. It works without internet. You can e-mail the file to someone; it opens on any computer.</p>
+<figure><img src="fig/view3d.png"><figcaption>Fig. 6. 3D view of the test plot, every tree in its own colour.</figcaption></figure>
+<table>
+<tr><th>Action</th><th>How</th></tr>
+<tr><td>Rotate</td><td>left mouse button and drag</td></tr>
+<tr><td>Move</td><td>right mouse button and drag</td></tr>
+<tr><td>Zoom</td><td>mouse wheel</td></tr>
+<tr><td>Tree data</td><td>click a tree or choose it from the “Tree” list</td></tr>
+<tr><td>Colours</td><td>buttons “trees”, “stem / branches / leaves”, “height”</td></tr>
+<tr><td>One tree</td><td>“Only this tree”, back: “All”</td></tr>
+<tr><td>Tree numbers</td><td>button “Tree numbers”</td></tr>
+<tr><td>DBH on the stem</td><td>a white ring on every stem 1.3 m above ground; the clicked tree gets a red ring labelled with its DBH. The same button switches the rings off.</td></tr>
+<tr><td>Shrubs</td><td>shrubs are purple; clicking a shrub shows its height and area. “Shrubs visible” hides them together with objects left out as shrubs.</td></tr>
+<tr><td>Lost?</td><td>“Reset view”</td></tr>
+<tr><td>Path and terrain</td><td>“Scanner path” and “Terrain” switch the yellow walking line and the ground surface (when available)</td></tr>
+<tr><td>Walk-through</td><td>group “Scanner walk-through”, see chapter 14</td></tr>
+</table>
+<figure><img src="fig/view3d_tree.png"><figcaption>Fig. 7. One tree selected and coloured by parts, with its data in the panel on the right.</figcaption></figure>
+<h2>DBH ring on the stem</h2>
+<p>Click a tree and a red ring appears on its stem 1.3 m above ground, labelled e.g. “DBH 36.4 cm”. The ring has the diameter from the report, so you can see at once whether it fits the stem: it should lie on the bark. A ring that is too wide or too narrow, or a ring in branches or in a shrub, means a tree to check (chapter 9). The other trees have thin white rings.</p>
+<p>The ring is at the same height where the DBH is measured: 1.3 m above the ground computed under each stem point. On a steep slope the ground on the downhill side is lower, so the stem goes further below the ring there. The cloud is thinned to 600,000 points to keep the file light.</p>
+
+<h1>9. Reviewing trees and “Recalculate report”</h1>
+<p>Start alone gives a result in which the program decides everything. When the result has to be reliable (for work or a contract), review the trees. For a plot with 60 trees this takes about 10 minutes.</p>
+<div class="step"><span class="n">1</span><h3>Open the review</h3></div>
+<p>Click <b>Review trees</b>. The 3D view opens directly in review mode. The program shows the trees one by one, the suspicious ones first: shrubs, snags, objects without a stem, uncertain trees and trees without DBH.</p>
+<figure><img src="fig/review.png"><figcaption>Fig. 8. Review mode. The current tree is highlighted against the scan, with its image, data and the program's decision and reason on the right.</figcaption></figure>
+<div class="step"><span class="n">2</span><h3>Decide with the keys</h3></div>
+<table>
+<tr><th>Key</th><th>Decision</th></tr>
+<tr><td>1</td><td>tree OK: goes into the results</td></tr>
+<tr><td>2</td><td>shrub: left out of the results</td></tr>
+<tr><td>3</td><td>snag: stays, volume from the measured stem</td></tr>
+<tr><td>4 / 5</td><td>spruce / beech (can be added after 1, e.g. 1 then 4)</td></tr>
+<tr><td>→</td><td>skip (the program's decision stays)</td></tr>
+<tr><td>←</td><td>back to the previous tree</td></tr>
+</table>
+<p>Clicking the image enlarges it. Decisions are saved in the browser as you go, so you can stop and come back later.</p>
+<div class="step"><span class="n">3</span><h3>Save the review</h3></div>
+<p>Click <b>Save review</b>. The browser asks where to save the file (or puts it in Downloads). Save it as <code>&lt;scan&gt;_sprawdzenie.csv</code> in <code>wyniki\&lt;scan&gt;\01_RAPORT</code>. If it ended up in Downloads, move it there by hand.</p>
+<div class="step"><span class="n">4</span><h3>Recalculate the report</h3></div>
+<p>In the program window click <b>Recalculate report</b>. Only the report and the 3D view are recomputed, in a few seconds, without processing the cloud again. Your decisions override the program's, and in Excel such trees have “yes” in the column “Checked manually”.</p>
+<div class="box"><b class="t">The review file is a plain table</b><code>nr;decyzja;gatunek</code> (number; decision; species), e.g. <code>15;shrub;</code> or <code>22;snag;spruce</code>. English and Polish values are both accepted. You can open and correct it in Excel or Notepad, then click Recalculate report again.</div>
+
+<h1>10. Tree species</h1>
+<p>There are four ways, from the simplest:</p>
+<ol>
+<li><b>Scanner tags (automatic):</b> if you tagged trees with the scanner in the field (the marker button and a species code, e.g. FI or BU), the program reads <code>markPoint.csv</code> from the raw session folder and assigns the species to the nearest stem if the tag is closer than 1 m. You do not need to do anything: Start or Recalculate report is enough. In Excel such trees have “scanner tag (FI)” in the column “Species – source”, and the GeoPackage has a layer <code>etykiety_skanera</code> (also with unassigned tags, so you can see which ones missed a stem).</li>
+<li><b>Whole plot one species:</b> choose “spruce only” or “beech only” in the window and click Start (computes from stage 2) or Recalculate report.</li>
+<li><b>Single trees in the review:</b> keys 4 (spruce) and 5 (beech), chapter 9.</li>
+<li><b>Any species in a table:</b> open <code>01_RAPORT\&lt;scan&gt;_species.csv</code> in Excel and type the species in the column <code>gatunek_reczny</code> (e.g. <code>spruce</code>, <code>beech</code>, <code>fir</code>). Save as CSV and click Recalculate report.</li>
+</ol>
+<p>Tag codes the program knows: FI spruce, BU beech, TA fir, KI pine, LA larch, EI oak, AH sycamore, ES ash, KR cherry, UL elm, taxus yew. Polish abbreviations (SW, BK, JD, SO, MD, DB) also work. An unknown code is skipped and mentioned in the summary. Order of priority, most important first: tree review, species file, scanner tags, whole-plot species, recognition from shape.</p>
+<p>The volume formula depends on the species. The formulas are in <code>tablice_miazszosci.csv</code>: by default general V = g·h·f, with form factor f 0.47 for spruce and 0.51 for beech. A species not in the table uses the formula of its group: coniferous (fir, pine, larch, Douglas fir, yew) 0.45, broadleaved (e.g. sycamore, oak, ash) 0.50. You can replace the file with regional tables; the format is described at its top.</p>
+
+<h1>11. Overnight queue (many scans at once)</h1>
+<p>When you have several or a dozen scans, set them up in the queue in the evening and leave the computer overnight. In the morning a summary of all plots is waiting in the <code>wyniki</code> folder.</p>
+<div class="step"><span class="n">1</span><h3>Open the queue</h3></div>
+<p>Click <b>Overnight queue…</b>. You can also drop several scan files or a whole folder onto <code>LidarTreeSegmenter.bat</code>: the queue opens by itself with those scans.</p>
+<div class="step"><span class="n">2</span><h3>Add scans</h3></div>
+<p><b>Add files…</b> (select many with Ctrl) or <b>Add folder…</b> (takes all <code>.laz</code> and <code>.las</code> files, also from subfolders, and skips the <code>wyniki</code> folder). The ↑ ↓ arrows change the order, <b>Remove selected</b> removes from the list (not from disk).</p>
+<div class="step"><span class="n">3</span><h3>Set stand class and species</h3></div>
+<p>Select scans (Ctrl or Shift + click), choose stand class and species at the top and click <b>Set</b>. Every scan can have different settings.</p>
+<div class="step"><span class="n">4</span><h3>Choose options</h3></div>
+<p><b>Skip stages already computed</b> (recommended): a scan computed earlier is not computed again; only what is missing or changed is done (e.g. a new review or field measurement file). <b>When finished</b>: do nothing, sleep or shut down the computer. Before sleep or shutdown there is a one-minute countdown with a Cancel button.</p>
+<div class="step"><span class="n">5</span><h3>Start the queue</h3></div>
+<p>Scans are processed one after another, and the main window shows the current one (“Queue: scan 3 of 8”). The Status column in the queue window: waiting, running, done, done earlier (nothing to compute), error. An error in one scan does not stop the others. The computer does not go to sleep while processing.</p>
+<h2>Summary</h2>
+<p>After each scan the file <code>wyniki\KOLEJKA_&lt;date&gt;_&lt;time&gt;.xlsx</code> is saved: one row per plot (status, time, stand class, species, area, number of trees, N/ha, Dg, Lorey's height, G/ha, volume, V/ha, shrubs, snags, error description) and the mean of the computed plots at the bottom. The log of each scan is in its <code>05_DZIENNIK</code>.</p>
+<div class="box warn"><b class="t">Before leaving it overnight</b>Plug the laptop in. In the Windows power settings closing the lid should not put the computer to sleep. Leave free disk space: one scan usually produces 0.5–2 GB of results.</div>
+
+<h1>12. Field measurement and GPS matching</h1>
+<p>A scan is in the scanner's own coordinate system: the origin where the scanner started, directions arbitrary. To put the results in the right place on a map, measure a few trees in the field (e.g. 5) with a GPS receiver (e.g. a Garmin) and a tape. The program finds these trees in the scan, rotates and shifts the scan into field coordinates and compares the DBH values.</p>
+<div class="step"><span class="n">1</span><h3>Prepare the file</h3></div>
+<p>Copy <code>TEMPLATE_field_measurement.csv</code> and name the copy <code>&lt;scan&gt;_field.csv</code>. Open it in Excel or Notepad and enter the trees:</p>
+<pre>nr;lat;lon;dbh_cm;species;height_m
+1;49.61234;20.71456;34;spruce;26
+2;N49 36.742;E20 42.880;41;spruce;
+3;49.61251;20.71470;28;;</pre>
+<p>Coordinates can be decimal degrees (with a dot or a comma) or the Garmin notation (<code>N49 36.742</code>). Species and height are optional. Instead of degrees you can give <code>x;y;epsg</code>, e.g. in EPSG 2180. You can also provide the Garmin waypoints as <code>&lt;scan&gt;_field.gpx</code> (waypoint name = tree number) and enter only the number and DBH in the CSV.</p>
+<div class="step"><span class="n">2</span><h3>Put the file in the folder</h3></div>
+<p>In <code>wyniki\&lt;scan&gt;\01_RAPORT</code> or next to the scan file. Click <b>Recalculate report</b> (or Start).</p>
+<div class="step"><span class="n">3</span><h3>Check the result</h3></div>
+<p>A sheet “Field measurement” appears in Excel: which scan tree is which field tree, DBH difference, GPS error in metres, scan rotation and the match rating: good, uncertain or weak. The file <code>01_RAPORT\&lt;scan&gt;_georef.gpkg</code> is also created, with all layers in field coordinates (UTM by default; another system: <code>python program\30_raport.py wyniki\&lt;scan&gt; --epsg 2180</code>).</p>
+<div class="box"><b class="t">How to measure so that the matching works</b>A Garmin under a canopy is off by 3–5 m, so the choice of trees matters. In tests with 5 trees, trees spread 6–14 m from the centre gave a correct rotation in 39 of 40 trials, trees clustered at the centre in 32 of 40.
+<ul><li>average the position in the Garmin (the “average waypoint” function, a minute at each tree);</li>
+<li>choose trees 6–14 m from the centre, in different directions;</li>
+<li>choose trees with clearly different DBH: that is how the program recognises which tree is which;</li>
+<li>measure DBH with a tape exactly at 1.3 m.</li></ul>
+“Uncertain” means that there is a second, differently rotated alignment that is almost as good. Then look at the layer <code>odchylki_gps</code> in QGIS and add one or two trees in the field.</div>
+
+<h1>13. GeoPackage in QGIS</h1>
+<p>The folder <code>01_RAPORT</code> has two files for QGIS: <code>&lt;scan&gt;.gpkg</code> (map of trees and terrain, all data) and <code>&lt;scan&gt;.qgs</code> (QGIS project). Double-click the <code>.qgs</code> file and QGIS opens all layers in the right order, with colours and labels. Nothing needs to be set up.</p>
+<p>You can also drag just the <code>.gpkg</code> file into the QGIS window and select the layers. The styles are stored in the file, so the layers look the same; only the order has to be arranged by hand (terrain at the bottom, trees on top). Layer names are Polish:</p>
+<table>
+<tr><th>Layer</th><th>Contents</th><th>At start</th></tr>
+<tr><td><code>drzewa</code> (trees)</td><td>a point for every stem with all the report data (DBH, height, species, volume, notes); colour by species, size by DBH, label = tree number</td><td>visible</td></tr>
+<tr><td><code>etykiety_skanera</code></td><td>species codes recorded with the scanner; blue triangle = assigned to a tree, red = too far from a stem</td><td>visible</td></tr>
+<tr><td><code>przekroj_1_3m</code>, <code>przekroj_3m</code></td><td>stem circles at 1.3 m and 3 m with diameter, circumference coverage and stem-check result</td><td>1.3 m visible</td></tr>
+<tr><td><code>punkty_1_3m</code>, <code>punkty_3m</code></td><td>cloud points in a ±5 cm slice, one colour (red at 1.3 m, blue at 3 m); field <code>czesc</code> says whether a point is stem, branch, leaves or understory, <code>odl_od_okregu_cm</code> is the distance from the stem circle</td><td>hidden, drawn from scale 1:400</td></tr>
+<tr><td><code>krzewy</code> (shrubs)</td><td>outline of every shrub (purple) with area and height; label = height</td><td>visible</td></tr>
+<tr><td><code>sciezka_skanera</code></td><td>the walking line of the scanner, when a path file was available</td><td>visible</td></tr>
+<tr><td><code>warstwice</code></td><td>contour lines, every fifth one bold and labelled (field <code>glowna</code>)</td><td>visible</td></tr>
+<tr><td><code>teren_cieniowanie</code>, <code>teren_wysokosc</code>, <code>teren_spadek</code></td><td>terrain model as rasters: coloured hillshade, ground elevation, slope in degrees (chapter 14)</td><td>hillshade visible</td></tr>
+</table>
+<p>A hidden layer is switched on by ticking the box next to its name in the Layers panel. Click a tree with the “Identify features” tool to see its data. Right-click a layer → Open attribute table shows all trees like in Excel.</p>
+<div class="box"><b class="t">Why there are fewer points</b>A ±5 cm slice of a dense scan has hundreds of thousands of points, which merge into blobs in QGIS and slow the map down. The program keeps one point per 1 cm cell for the bark (the DBH is computed from it, so the stem arc stays complete) and one per 4 cm cell for branches, leaves and understory. The full cloud is still in the <code>.laz</code> files.</div>
+<h2>Coordinate system</h2>
+<p>A scan without a field measurement has scanner (local) coordinates. QGIS shows it in the system “LidarTreeSegmenter – local scan system (metres)”: the scale bar and scale are correct, but the map will not match a basemap. For a basemap open <code>&lt;scan&gt;_georef.qgs</code> or <code>_georef.gpkg</code> from chapter 12. That project also has the layers <code>pomiar_terenowy</code> (field measurement, blue triangles) and <code>odchylki_gps</code> (red lines from the scan tree to the field point).</p>
+
+<h1>14. Scanner path, terrain and the scanner walk-through</h1>
+<p>A handheld (SLAM) scanner usually saves a second file next to the cloud: the scanner path (trajectory), i.e. the line you walked. The program works without it, but when it is there, the results tell you more.</p>
+<h2>Where the program gets the path</h2>
+<p>It looks by itself. It takes a file that has the same scan code in its name and one of the words <code>Trajectory</code>, <code>traj</code>, <code>sciezka</code>, <code>path</code>, <code>odom</code>, <code>pose</code>, <code>track</code> (e.g. <code>_N0h_Trajectory.las</code> for <code>_N0h__r25.laz</code>). It looks next to the scan file, one folder up and in <code>wyniki\&lt;scan&gt;\01_RAPORT</code>. The window shows the file found in the <b>Scanner path</b> row.</p>
+<p>If the file is named differently, click <b>Choose…</b> and select it. <b>Find automatically</b> clears the choice. The choice is saved for the scan when you click Start or Recalculate report. You can also put the file in as <code>01_RAPORT\&lt;scan&gt;_sciezka.csv</code> (or another extension).</p>
+<table>
+<tr><th>Format</th><th>Examples</th></tr>
+<tr><td><code>.las</code>, <code>.laz</code></td><td>trajectory from the scanner software</td></tr>
+<tr><td><code>.txt</code>, <code>.csv</code>, <code>.xyz</code>, <code>.pts</code>, <code>.asc</code></td><td>exports from GeoSLAM, Emesent, ROS, TUM, KITTI, plain x y z columns; separator, decimal comma and header are detected automatically</td></tr>
+<tr><td><code>.ply</code></td><td>text and binary</td></tr>
+</table>
+<p>The path must be in the same coordinate system as the scan. If it lies elsewhere (e.g. exported in UTM while the scan is local), the program skips it and says so in the log.</p>
+<h2>What the path gives you</h2>
+<ul>
+<li><b>Tree images</b>: in the 1.3 m cross-section a grey ring shows the sides of the stem that the scanner passed closer than 15 m, and an arrow points to the nearest path point. A DBH from a stem seen from one side only is less certain.</li>
+<li><b>Excel</b>: in the Trees sheet the columns Distance from scanner path and Path coverage (percent of the circumference); in the summary the path length, mean values and the number of trees farther than 12 m from the path.</li>
+<li><b>GeoPackage</b>: the layer <code>sciezka_skanera</code>, and the same two values in the trees layer.</li>
+<li><b>3D view</b>: a yellow line and the walk-through animation.</li>
+</ul>
+<h2>Scanner walk-through in the 3D view</h2>
+<p>When a path is available, the 3D view menu has a group <b>Scanner walk-through</b>. Click <b>▶ Play walk-through</b>: a red ball moves along the path, and the cloud points appear when the scanner comes closer than 10 m (red circle). This shows the order in which the forest was scanned and which places the scanner only passed from afar. The upper slider moves to any point of the path, the lower one sets the speed (1–20 m/s), <b>Camera follows scanner</b> moves the view with the ball and <b>Whole cloud</b> ends the animation. To make a video, record the screen (Win + Alt + R or the Snipping Tool in recording mode).</p>
+<h2>Terrain model</h2>
+<p>From the ground points the program computes an elevation grid with 0.25 m cells (the same ground from which tree heights are measured). No extra file is needed.</p>
+<ul>
+<li><b>GeoPackage</b>: rasters <code>teren_wysokosc</code> (elevation), <code>teren_spadek</code> (slope) and <code>teren_cieniowanie</code> (hillshade), and the layer <code>warstwice</code> (contours). The contour interval is chosen automatically: 0.25 m on flat ground, 0.5 m with relief up to 10 m, 1 m on slopes.</li>
+<li><b>Excel, Summary sheet</b>: lowest point, relief, mean slope in degrees and percent, slope of the steepest places (95 % of the area is less steep) and aspect (the direction the slope faces).</li>
+<li><b>3D view</b>: the <b>Terrain</b> button shows a semi-transparent brown ground surface.</li>
+</ul>
+<p>Heights are in the scan's coordinate system, not above sea level. The <code>_georef.gpkg</code> file from chapter 12 gets contours and the path in field coordinates; the rasters stay only in the ordinary <code>.gpkg</code>.</p>
+
+<h1>15. English and Polish versions</h1>
+<p>The whole program window, messages, Excel report, GeoPackage and 3D view exist in English and Polish. <code>LidarTreeSegmenter.bat</code> and <code>DRAG_SCAN_HERE.bat</code> start the English version; <code>LidarTreeSegmenter_PL.bat</code> and <code>PRZECIAGNIJ_TU_SKAN.bat</code> the Polish one. Results go to the same <code>wyniki</code> folder and the numbers are identical; only the texts change. The language is set by the environment variable <code>LTS_LANG</code> (<code>en</code> by default, <code>pl</code> for Polish), which also applies when you run the scripts in <code>program\</code> from the command line.</p>
+<p>Folder names in <code>wyniki</code>, some layer and file names, and the code comments are Polish in both versions. Files you type yourself (species, review, field measurement) accept English and Polish values.</p>
+
+<h1>16. Frequent problems (FAQ)</h1>
+<h3>Nothing happens after clicking LidarTreeSegmenter.bat, or a black window flashes</h3>
+<p>Most often Python is not in PATH. Check <code>python --version</code> (chapter 2). If Python is there, run <code>INSTALL_ONCE.bat</code> once.</p>
+<h3>“Libraries missing” / error during installation</h3>
+<p>Run <code>INSTALL_ONCE.bat</code> and read what it says at the end. An internet connection without a company proxy often helps. If it still does not work, copy all the text from the black window and include it in your question.</p>
+<h3>Processing stopped, the log says “MemoryError” or the window closed by itself</h3>
+<p>Out of memory. Close other programs (a browser with many tabs). A large scan (40 million points or more) needs about 8 GB of free memory; crop it in CloudCompare to a circle with a 20 m radius.</p>
+<h3>Something went wrong and I do not know what</h3>
+<p>Click <b>Copy log</b> and paste the text together with a description of what you did. The log of every run is also in <code>05_DZIENNIK</code>.</p>
+<h3>A tree appears twice, or two trees are one</h3>
+<p>This happens with stems growing very close together or fused at the base. The program looks for a second stem in every tree: reaching high (at least 4 m and 40 % of the tree height), straight, round and standing next to the main stem. When the second stem is visible separately at 1.3 m (or stands clearly apart), it becomes a new tree with the next number; the notes of both trees say “fused with tree …”. A fork above 1.3 m is one tree by forest mensuration rules and gets the note “fork at … m”. When the program is still wrong, mark the extra tree as a shrub in the review (chapter 9).</p>
+<h3>A tree is reported where there is no tree</h3>
+<p>The cylinder check removes objects in which no real stem can be found (shown as “no stem”, grey in Excel, not in totals). If such an object is still counted, mark it as a shrub in the review.</p>
+<h3>The DBH is clearly wrong</h3>
+<p>Look at the cross-section on the tree image. If the circle does not lie on the bark, mark the tree in the review. When the two methods disagree, the report chooses the one that fits the height curve and says so in the notes.</p>
+<h3>Too many beeches in a spruce stand</h3>
+<p>Choose “spruce only” in the window (chapter 3). Species recognition from shape in a dense stand is weak.</p>
+<h3>The GPS matching is “uncertain” or “weak”</h3>
+<p>See the box in chapter 12. Most often the trees are too close to the centre or have similar DBH. Add a tree in another direction.</p>
+<h3>I saved the review file but the report did not change</h3>
+<p>The file must be in <code>wyniki\&lt;scan&gt;\01_RAPORT</code> and be named exactly <code>&lt;scan&gt;_sprawdzenie.csv</code> (browsers sometimes add “(1)” to the name). Then click Recalculate report.</p>
+<h3>The 3D view is empty or black</h3>
+<p>Open the file in Chrome or Edge. An old browser or disabled graphics acceleration may not support 3D (WebGL).</p>
+<h3>Can I use the computer while it is processing?</h3>
+<p>Yes, but heavy programs slow processing down and take memory. Do not close the program window.</p>
+<h3>Can I delete the results folder?</h3>
+<p>Yes, these are only results. Start computes them again. Do not delete the scan itself.</p>
+
+<h1>17. Glossary</h1>
+<table>
+<tr><th>Term</th><th>Meaning</th></tr>
+<tr><td>TLS / MLS</td><td>terrestrial laser scanning (scanner on a tripod) / mobile laser scanning (handheld or carried scanner).</td></tr>
+<tr><td>Point cloud</td><td>a set of x, y, z points, the result of scanning.</td></tr>
+<tr><td>.laz / .las</td><td>point cloud file formats; .laz is a compressed .las.</td></tr>
+<tr><td>DBH (D1.3)</td><td>stem diameter at 1.3 m above the ground.</td></tr>
+<tr><td>Dg</td><td>DBH of the tree with the mean basal area (quadratic mean diameter).</td></tr>
+<tr><td>Lorey's height</td><td>mean tree height weighted by basal area.</td></tr>
+<tr><td>G/ha</td><td>basal area: sum of stem cross-section areas at 1.3 m per hectare.</td></tr>
+<tr><td>V/ha</td><td>volume: wood volume per hectare, in m³.</td></tr>
+<tr><td>Merchantable timber</td><td>wood thicker than 7 cm (over bark).</td></tr>
+<tr><td>Form factor</td><td>the ratio of the tree's volume to a cylinder with the same DBH and height.</td></tr>
+<tr><td>Snag</td><td>a broken tree: low and thick, stem empty inside its cross-section.</td></tr>
+<tr><td>Understory</td><td>shrubs and young trees in the lowest forest layer.</td></tr>
+<tr><td>Shrub (in the report)</td><td>a body of branches and leaves 0.3–4 m above ground outside the stems, at least 0.5 m² from above.</td></tr>
+<tr><td>Segmentation</td><td>splitting the cloud into individual trees.</td></tr>
+<tr><td>Terrain model (DTM)</td><td>the ground surface computed from the lowest points.</td></tr>
+<tr><td>GeoPackage (.gpkg)</td><td>a file with map layers, opened in QGIS.</td></tr>
+<tr><td>EPSG 2180</td><td>the Polish national coordinate system PL-1992.</td></tr>
+<tr><td>CloudCompare</td><td>a free program for viewing and cropping point clouds.</td></tr>
+<tr><td>QGIS</td><td>a free mapping (GIS) program.</td></tr>
+</table>
+</body></html>

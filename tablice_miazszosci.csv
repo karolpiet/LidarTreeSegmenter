@@ -1,0 +1,14 @@
+﻿# VOLUME TABLES - replace with your own. One row = one species (or species group).
+# wzor = ghf      -> V = g * h * f   (g = pi/4 * d^2 [m2], h [m], f = form factor)
+# wzor = potegowy -> V = a * d^b * h^c   (d in cm, h in m, V in m3) - put regional formulas here
+# Names in the "grupa" column must match the species in <scan>_gatunki.csv. Internal names are Polish:
+#   świerk = spruce, buk = beech, jodła = fir, iglaste = coniferous, liściaste = broadleaved, nieokreślony = unspecified
+# The form factors below are approximate - replace them with tables for your region.
+# opis / zrodlo - description and source in Polish; opis_en / zrodlo_en - the same in English (used by the English version)
+grupa;opis;wzor;f;a;b;c;zrodlo;opis_en;zrodlo_en
+świerk;Świerk – wzór ogólny;ghf;0.47;;;;przybliżona pierśnicowa liczba kształtu grubizny świerka w drzewostanach dojrzałych;Spruce – general formula;approximate breast-height form factor of merchantable timber for spruce in mature stands
+buk;Buk – wzór ogólny;ghf;0.51;;;;przybliżona pierśnicowa liczba kształtu grubizny buka w drzewostanach dojrzałych;Beech – general formula;approximate breast-height form factor of merchantable timber for beech in mature stands
+iglaste;Iglaste – wzór ogólny;ghf;0.45;;;;przeciętna pierśnicowa liczba kształtu grubizny drzewostanów iglastych Europy Środkowej;Coniferous – general formula;average breast-height form factor of merchantable timber of Central European coniferous stands
+liściaste;Liściaste – wzór ogólny;ghf;0.50;;;;przeciętna pierśnicowa liczba kształtu grubizny drzewostanów liściastych Europy Środkowej;Broadleaved – general formula;average breast-height form factor of merchantable timber of Central European broadleaved stands
+nieokreślony;Gatunek nieokreślony – wzór ogólny;ghf;0.47;;;;średnia ze świerka i buka;Unspecified species – general formula;mean of spruce and beech
+nieokreślone;Gatunek nieokreślony – wzór ogólny;ghf;0.47;;;;to samo co nieokreślony (zgodność ze starszymi plikami);Unspecified species – general formula;same as the unspecified row above (compatibility with older files)

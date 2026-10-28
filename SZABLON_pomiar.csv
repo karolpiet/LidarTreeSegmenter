@@ -1,0 +1,21 @@
+# LidarTreeSegmenter - pomiar terenowy kilku drzew (np. 5 drzew Garminem)
+# Zapisz kopię tego pliku jako <nazwa_skanu>_pomiar.csv, np. _S4v__r20_pomiar.csv,
+# w folderze wyników skanu (01_RAPORT) albo obok pliku skanu, i uruchom raport.
+# Linie zaczynające się od # są pomijane - możesz je usunąć.
+#
+# nr            - Twój numer drzewa (dowolny, nie musi się zgadzać z numerami LidarTreeSegmenter)
+# szerokosc     - szerokość geograficzna z Garmina, np. 49.61234 albo N49 36.740
+# dlugosc       - długość geograficzna, np. 19.51234 albo E19 30.740
+# piersnica_cm  - pierśnica w cm (ważne - po niej program rozpoznaje drzewa)
+# gatunek       - świerk / buk / inny (nieobowiązkowe)
+# wysokosc_m    - wysokość w m (nieobowiązkowe)
+#
+# Zamiast szerokosc/dlugosc możesz podać kolumny x;y;epsg (np. EPSG 2180).
+# Możesz też zapisać punkty z Garmina jako <nazwa_skanu>_pomiar.gpx
+# (nazwy punktów = numery drzew), a tu wpisać tylko nr i pierśnicę.
+nr;szerokosc;dlugosc;piersnica_cm;gatunek;wysokosc_m
+1;49.612340;19.512340;34;świerk;27
+2;49.612410;19.512460;41;świerk;
+3;49.612280;19.512500;28;buk;24
+4;49.612200;19.512310;52;świerk;
+5;49.612350;19.512180;19;buk;
